@@ -1,7 +1,7 @@
+### Task parameters
 import pathlib
 import os
 
-### Task parameters
 DATA_DIR = os.path.expanduser('~/dg/IL_data')
 TASK_CONFIGS = {
     'dsr_single_block_sorting':{
@@ -12,6 +12,3 @@ TASK_CONFIGS = {
 }
 
 HZ = 30
-DT = 1/HZ
-
-XML_DIR = str(pathlib.Path(__file__).parent.resolve()) + '/assets/' # note: absolute path

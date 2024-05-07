@@ -31,7 +31,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
             self.augment_images = True
         else:
             self.augment_images = False
-        self.transformations = None
+        self.transformations = True
         self.__getitem__(0) # initialize self.is_sim and self.transformations
         self.is_sim = False
 
@@ -49,35 +49,40 @@ class EpisodicDataset(torch.utils.data.Dataset):
         episode_id, start_ts = self._locate_transition(index)
         dataset_path = self.dataset_path_list[episode_id]
         try:
-            # print(dataset_path)
+            
             with h5py.File(dataset_path, 'r') as root:
                 try: # some legacy data does not have this attribute
                     is_sim = root.attrs['sim']
                 except:
                     is_sim = False
+
                 compressed = root.attrs.get('compress', False)
                 if '/base_action' in root:
                     base_action = root['/base_action'][()]
                     base_action = preprocess_base_action(base_action)
-                    action = np.concatenate([root['/action'][()], base_action], axis=-1)
+                    action = np.concatenate([ root['/actions/pose'][()], root['/actions/gripper_pos'][()], base_action ], axis=-1)
                 else:  
-                    action = root['/action'][()]
-                    dummy_base_action = np.zeros([action.shape[0], 2])
-                    action = np.concatenate([action, dummy_base_action], axis=-1)
+                    action = np.concatenate([ root['/actions/pose'][()], root['/actions/gripper_pos'][()] ], axis=-1)
+                    # dummy_base_action = np.zeros([action.shape[0], 2])
+                    # action = np.concatenate([action, dummy_base_action], axis=-1)
                 original_action_shape = action.shape
                 episode_len = original_action_shape[0]
                 # get observation at start_ts only
-                qpos = root['/observations/qpos'][start_ts]
-                qvel = root['/observations/qvel'][start_ts]
+                xpos = root['/observations/xpos'][start_ts]
+                euler = root['/observations/euler'][start_ts]
+                gripper_pos = root['/observations/gripper_pos'][start_ts]
+
+                robot_state = np.concatenate( [xpos, euler, gripper_pos] )
                 image_dict = dict()
                 for cam_name in self.camera_names:
                     image_dict[cam_name] = root[f'/observations/images/{cam_name}'][start_ts]
+                
                 
                 if compressed:
                     for cam_name in image_dict.keys():
                         decompressed_image = cv2.imdecode(image_dict[cam_name], 1)
                         image_dict[cam_name] = np.array(decompressed_image)
-                
+
                 # get all actions after and including start_ts
                 if is_sim:
                     action = action[start_ts:]
@@ -103,7 +108,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
             # construct observations
             image_data = torch.from_numpy(all_cam_images)
-            qpos_data = torch.from_numpy(qpos).float()
+            robot_state_data = torch.from_numpy(robot_state).float()
             action_data = torch.from_numpy(padded_action).float()
             is_pad = torch.from_numpy(is_pad).bool()
 
@@ -119,7 +124,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     transforms.RandomCrop(size=[int(original_size[0] * ratio), int(original_size[1] * ratio)]),
                     transforms.Resize(original_size, antialias=True),
                     transforms.RandomRotation(degrees=[-5.0, 5.0], expand=False),
-                    transforms.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5) #, hue=0.08)
+                    transforms.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5, hue=0.08)
                 ]
 
             if self.augment_images:
@@ -136,42 +141,46 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 # normalize to mean 0 std 1
                 action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats["action_std"]
 
-            qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
+            robot_state_data = (robot_state_data - self.norm_stats["state_mean"]) / self.norm_stats["state_std"]
 
         except:
             print(f'Error loading {dataset_path} in __getitem__')
             quit()
 
         # print(image_data.dtype, qpos_data.dtype, action_data.dtype, is_pad.dtype)
-        return image_data, qpos_data, action_data, is_pad
+        return image_data, robot_state_data, action_data, is_pad
 
 
 def get_norm_stats(dataset_path_list):
-    all_qpos_data = []
+    all_state_data = []
     all_action_data = []
     all_episode_len = []
 
     for dataset_path in dataset_path_list:
         try:
             with h5py.File(dataset_path, 'r') as root:
-                qpos = root['/observations/qpos'][()]
-                qvel = root['/observations/qvel'][()]
+                xpos = root['/observations/xpos'][()]
+                euler = root['/observations/euler'][()]
+                gripper_pos = root['/observations/gripper_pos'][()]
+                state = np.concatenate([xpos, euler, gripper_pos], axis=-1)
+                # qpos = root['/observations/qpos'][()]
+                # qvel = root['/observations/qvel'][()]
                 if '/base_action' in root:
                     base_action = root['/base_action'][()]
                     base_action = preprocess_base_action(base_action)
-                    action = np.concatenate([root['/action'][()], base_action], axis=-1)
+                    action = np.concatenate([ root['/actions/pose'][()], root['/actions/gripper_pos'][()], base_action ], axis=-1)
                 else:
-                    action = root['/action'][()]
-                    dummy_base_action = np.zeros([action.shape[0], 2])
-                    action = np.concatenate([action, dummy_base_action], axis=-1)
+                    action = np.concatenate([ root['/actions/pose'][()], root['/actions/gripper_pos'][()] ], axis=-1)
+                    # dummy_base_action = np.zeros([action.shape[0], 2])
+                    # action = np.concatenate([action, dummy_base_action], axis=-1)
         except Exception as e:
             print(f'Error loading {dataset_path} in get_norm_stats')
             print(e)
             quit()
-        all_qpos_data.append(torch.from_numpy(qpos))
+        all_state_data.append(torch.from_numpy(state))
         all_action_data.append(torch.from_numpy(action))
-        all_episode_len.append(len(qpos))
-    all_qpos_data = torch.cat(all_qpos_data, dim=0)
+        all_episode_len.append(len(state))
+    all_state_data = torch.cat(all_state_data, dim=0)
     all_action_data = torch.cat(all_action_data, dim=0)
 
     # normalize action data
@@ -180,9 +189,9 @@ def get_norm_stats(dataset_path_list):
     action_std = torch.clip(action_std, 1e-2, np.inf) # clipping
 
     # normalize qpos data
-    qpos_mean = all_qpos_data.mean(dim=[0]).float()
-    qpos_std = all_qpos_data.std(dim=[0]).float()
-    qpos_std = torch.clip(qpos_std, 1e-2, np.inf) # clipping
+    state_mean = all_state_data.mean(dim=[0]).float()
+    state_std = all_state_data.std(dim=[0]).float()
+    state_std = torch.clip(state_std, 1e-2, np.inf) # clipping
 
     action_min = all_action_data.min(dim=0).values.float()
     action_max = all_action_data.max(dim=0).values.float()
@@ -190,8 +199,7 @@ def get_norm_stats(dataset_path_list):
     eps = 0.0001
     stats = {"action_mean": action_mean.numpy(), "action_std": action_std.numpy(),
              "action_min": action_min.numpy() - eps,"action_max": action_max.numpy() + eps,
-             "qpos_mean": qpos_mean.numpy(), "qpos_std": qpos_std.numpy(),
-             "example_qpos": qpos}
+             "state_mean": state_mean.numpy(), "state_std": state_std.numpy()}
 
     return stats, all_episode_len
 
@@ -262,8 +270,8 @@ def load_data(dataset_dir_l, name_filter, camera_names, batch_size_train, batch_
     # construct dataset and dataloader
     train_dataset = EpisodicDataset(dataset_path_list, camera_names, norm_stats, train_episode_ids, train_episode_len, chunk_size, policy_class)
     val_dataset = EpisodicDataset(dataset_path_list, camera_names, norm_stats, val_episode_ids, val_episode_len, chunk_size, policy_class)
-    train_num_workers = (8 if os.getlogin() == 'zfu' else 16) if train_dataset.augment_images else 2
-    val_num_workers = 8 if train_dataset.augment_images else 2
+    train_num_workers = (24 if os.getlogin() == 'robrosdg' else 16) if train_dataset.augment_images else 8
+    val_num_workers = 8 if train_dataset.augment_images else 4
     print(f'Augment images: {train_dataset.augment_images}, train_num_workers: {train_num_workers}, val_num_workers: {val_num_workers}')
     train_dataloader = DataLoader(train_dataset, batch_sampler=batch_sampler_train, pin_memory=True, num_workers=train_num_workers, prefetch_factor=2)
     val_dataloader = DataLoader(val_dataset, batch_sampler=batch_sampler_val, pin_memory=True, num_workers=val_num_workers, prefetch_factor=2)
