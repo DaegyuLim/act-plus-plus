@@ -12,7 +12,7 @@ import wandb
 import time
 import torchvision.transforms.v2 as transforms
 
-from constants import HZ
+from robot.constants import HZ
 from utils import load_data # data functions
 from utils import sample_box_pose, sample_insertion_pose # robot functions
 from utils import compute_dict_mean, set_seed, detach_dict, calibrate_linear_vel, postprocess_base_action # helper functions
@@ -53,10 +53,10 @@ def main(args):
     # get task parameters
     is_sim = task_name[:4] == 'sim_'
     if is_sim or task_name == 'all':
-        from constants import SIM_TASK_CONFIGS
+        from robot.constants import SIM_TASK_CONFIGS
         task_config = SIM_TASK_CONFIGS[task_name]
     else:
-        from constants import TASK_CONFIGS
+        from robot.constants import TASK_CONFIGS
         task_config = TASK_CONFIGS[task_name]
     dataset_dir = task_config['dataset_dir']
     # num_episodes = task_config['num_episodes']
@@ -644,7 +644,7 @@ if __name__ == '__main__':
     parser.add_argument('--wandb', action='store_true')
     parser.add_argument('--ckpt_dir', action='store', type=str, default='/home/robrosdg/dg/robros_imitation_learning/ckpt/default', help='ckpt_dir', required=True)
     parser.add_argument('--policy_class', action='store', type=str, default='ACT', help='policy_class, capitalize', required=True)
-    parser.add_argument('--task_name', action='store', type=str, default='dsr_single_block_sorting', help='task_name', required=True)
+    parser.add_argument('--task_name', action='store', type=str, default='dsr_block_collect', help='task_name', required=True)
     parser.add_argument('--batch_size', action='store', type=int, default=8, help='batch_size', required=True)
     parser.add_argument('--seed', action='store', type=int, default=0, help='seed', required=True)
     parser.add_argument('--num_steps', action='store', type=int, default=2000, help='num_steps', required=True)

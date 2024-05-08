@@ -7,7 +7,7 @@ import time
 from visualize_episodes import visualize_joints, visualize_timestamp, save_videos
 
 import matplotlib.pyplot as plt
-from constants import DT
+from robot.constants import DT
 
 import IPython
 e = IPython.embed

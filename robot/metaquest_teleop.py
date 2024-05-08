@@ -29,10 +29,10 @@ except:
     ROBOT_ID     = "dsr_l"
 ROBOT_MODEL = "a0509"
 
-import DR_init
-DR_init.__dsr__id = ROBOT_ID
-DR_init.__dsr__model = ROBOT_MODEL
-from DSR_ROBOT import *
+# import DR_init
+# DR_init.__dsr__id = ROBOT_ID
+# DR_init.__dsr__model = ROBOT_MODEL
+# from DSR_ROBOT import *
 
 class drlControl:
     def __init__(self, robot_id = 'dsr_l', hz = 30, init_node=True, teleop=True):
@@ -45,7 +45,6 @@ class drlControl:
 
         rospy.on_shutdown(self.shutdown)
         ### publisher ###
-        self.pub_stop = rospy.Publisher('/'+robot_id+'/stop', RobotStop, queue_size=10)
         self.pose_state_pub = rospy.Publisher('/'+robot_id +'/state/pose', PoseStamped, tcp_nodelay=True, queue_size=10)
         self.joint_state_pub = rospy.Publisher('/'+robot_id +'/state/joint', Float32MultiArray, tcp_nodelay=True, queue_size=10)
         self.pose_action_pub = rospy.Publisher('/'+robot_id +'/action/pose', PoseStamped, tcp_nodelay=True, queue_size=10)
@@ -59,7 +58,7 @@ class drlControl:
         self.ovr2ros_left_hand_inputs_sub = rospy.Subscriber("/q2r_left_hand_inputs",OVR2ROSInputs,self.ovr2ros_left_hand_inputs_callback)
 
         ### initialize variables ###
-        self.r = CDsrRobot(ROBOT_ID, ROBOT_MODEL)
+        # self.r = CDsrRobot(ROBOT_ID, ROBOT_MODEL)
 
         self.msgRobotState_cb_count = 0
         self.right_hand_pose_raw = PoseStamped()
@@ -151,18 +150,20 @@ class drlControl:
         rospy.set_param('/use_sim_time', False)
         time.sleep(1)
         # t1 = threading.Thread(target=teleop.thread_subscriber)
-        self.thread1 = threading.Thread(target=self.drl_tcp_client.read_data)
+        self.thread1 = threading.Thread(target=self.tcp_trhead)
         self.thread1.daemon = True 
         self.thread1.start()
 
         while not rospy.is_shutdown() and self.drl_tcp_client.first_data_get == False:
             time.sleep(1)
             print('waiting robot data read from DSL tcp server...')
+        
+        self.dsr_desired_x_pose_lpf[:] = self.drl_tcp_client.current_posx[:]
+        
 
     def shutdown(self):
         print("\n DSR CONTROL SHUTDOWN! \n")
         self.drl_tcp_client.shutdown()
-        self.pub_stop.publish(stop_mode=STOP_TYPE_QUICK)
         return 0
 
     def msgRobotState_cb(self, msg):
@@ -339,7 +340,7 @@ class drlControl:
             #     for i in range(3):
             #         self.dsr_desired_x_pose[i] = self.dsr_desired_x_pose_pre[i] + (d_x_pose[i])/d_x_pose_norm*self.max_lin_vel
 
-            k_v = 2.3
+            # k_v = 2.3
             for i in range(3):
                 self.dsr_desired_x_pose_lpf[i] = self.lpf(self.dsr_desired_x_pose[i], self.dsr_desired_x_pose_lpf[i], self.lpf_cutoff_hz)
                 # self.dsr_desired_x_vel[i] = np.clip(k_v*(self.dsr_desired_x_pose_lpf[i] - self.current_dsr_pos[i]), -300, 300) # dim: [mm/s]
@@ -403,12 +404,13 @@ class drlControl:
     def calculateTragetVelocity(self, target_pose):
         # position
         k_v = 2.3
-        target_vel = [0, 0, 0, 0, 0, 0]
+        target_vel = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         for i in range(3):
             target_vel[i] = np.clip(k_v*(target_pose[i] - self.current_dsr_pos[i]), -300, 300) # dim: [mm/s]
 
         # rotation
-        self.dsr_desired_rotm = Rotation.from_euler("ZYZ", target_pose[3:6])
+        target_rotation = Rotation.from_euler("ZYZ", target_pose[3:6], degrees=True)
+        self.dsr_desired_rotm = target_rotation.as_matrix()
         delta_rotation = Rotation.from_matrix( np.dot(self.dsr_desired_rotm, np.transpose(self.current_dsr_rotm)) )
         k_w = 2.5
         for i in range(3):
@@ -436,6 +438,20 @@ class drlControl:
         val = (self.dt * data + self.tau * prev_data) / (self.tau + self.dt)
         return val
     
+    def tcp_trhead(self):
+        
+        while not rospy.is_shutdown():
+            self.drl_tcp_client.read_data()
+
+            for i in range(3):
+                self.current_dsr_pos[i] = self.drl_tcp_client.current_posx[i]
+                self.current_dsr_euler[i] = self.drl_tcp_client.current_posx[i+3]
+            self.current_dsr_rotm = self.drl_tcp_client.current_dsr_rotm.copy()
+
+            self.dsr_desired_x_vel = self.calculateTragetVelocity(self.dsr_desired_x_pose_lpf)
+
+            self.drl_tcp_client.send_command(self.control_mode, self.dsr_desired_x_vel)
+
     def step(self):
         # print(1e9*rospy.Time.now().secs + rospy.Time.now().nsecs)
         # read controller inputs
@@ -445,10 +461,7 @@ class drlControl:
         # read robot data
         # teleop.readRobotData()
 
-        for i in range(3):
-            self.current_dsr_pos[i] = self.drl_tcp_client.current_posx[i]
-            self.current_dsr_euler[i] = self.drl_tcp_client.current_posx[i+3]
-        self.current_dsr_rotm = self.drl_tcp_client.current_dsr_rotm.copy()
+        
 
         # if self.tick % self.hz == 0:
         #     print("teleop.current_dsr_pos: ", self.current_dsr_pos[0:3])
@@ -458,10 +471,8 @@ class drlControl:
             self.readControllerInputs()
             self.calculateTragetPose()
 
-        self.dsr_desired_x_vel = self.calculateTragetVelocity(self.dsr_desired_x_pose_lpf)
         t2 = rospy.Time.now()
-
-        self.drl_tcp_client.send_command(self.control_mode, self.dsr_desired_x_vel) # inverse trigger command
+        # self.drl_tcp_client.send_command(self.control_mode, self.dsr_desired_x_vel) # inverse trigger command
 
         self.rosMsgPublish()
         # save current values to the previous values
@@ -475,7 +486,12 @@ class drlControl:
 
     def stop(self):
         print("stop dsr robot")
-        self.drl_tcp_client.send_command(0, [0, 0, 0, 0, 0, 0])
+        self.control_mode = 0
+        self.dsr_desired_x_pose_lpf[0:3] = self.current_dsr_pos[:]
+        self.dsr_desired_x_pose_lpf[3:6] = self.current_dsr_euler[:]
+
+        self.dsr_desired_x_vel = [0, 0, 0, 0, 0, 0]
+        self.drl_tcp_client.send_command(self.control_mode, self.dsr_desired_x_vel)
 
     def get_xpos(self):
         return self.current_dsr_pos
@@ -487,6 +503,7 @@ class drlControl:
         return np.array(self.dsr_desired_x_pose_lpf)
 
     def set_action(self, target_pose):
+        self.control_mode = 1
         for i in range(6):
             self.dsr_desired_x_pose_lpf[i] = target_pose[i]
     
@@ -525,31 +542,31 @@ class TcpClient:
         self.client_socket.send(command_bytes)
 
     def read_data(self):
-        while not rospy.is_shutdown():
-            # t1 = rospy.Time.now()
-            try:
-                self.current_posx_bytes = self.client_socket.recv(24)
-            except:
-                print("Exit DSR state recieve thread!")
-                return
-            # print("self.current_posx_bytes: ",self.current_posx_bytes)
-            if len(self.current_posx_bytes) == 24:
-                currnet_posx_tuple = struct.unpack('6f', self.current_posx_bytes)
-            else:
-                print('[WARNING] the size of current_posx_bytes is not 24!!')
-                break
-            # print("currnet_posx_tuple: ", currnet_posx_tuple)
-            for i in range(6):
-                self.current_posx[i] = currnet_posx_tuple[i]
-            # self.right_gripper_state_msg.data = currnet_posx_tuple[6]
+    
+        # t1 = rospy.Time.now()
+        try:
+            self.current_posx_bytes = self.client_socket.recv(24)
+        except:
+            print("Exit DSR state recieve thread!")
+            return
+        # print("self.current_posx_bytes: ",self.current_posx_bytes)
+        if len(self.current_posx_bytes) == 24:
+            currnet_posx_tuple = struct.unpack('6f', self.current_posx_bytes)
+        else:
+            print('[WARNING] the size of current_posx_bytes is not 24!!')
+            # break
+        # print("currnet_posx_tuple: ", currnet_posx_tuple)
+        for i in range(6):
+            self.current_posx[i] = currnet_posx_tuple[i]
+        # self.right_gripper_state_msg.data = currnet_posx_tuple[6]
 
-            r_current_ori = Rotation.from_euler("ZYZ", self.current_posx[3:6], degrees=True)
-            self.current_dsr_rotm = r_current_ori.as_matrix()
-            # t2 = rospy.Time.now()
-            # print("t2-t1: ", (t2-t1)) # 90~150 ms
-            if self.first_data_get == False:
-                self.first_data_get = True
-                print('get first robot data: ', self.current_posx)
+        r_current_ori = Rotation.from_euler("ZYZ", self.current_posx[3:6], degrees=True)
+        self.current_dsr_rotm = r_current_ori.as_matrix()
+        # t2 = rospy.Time.now()
+        # print("t2-t1: ", (t2-t1)) # 90~150 ms
+        if self.first_data_get == False:
+            self.first_data_get = True
+            print('get first robot data: ', self.current_posx)
     
     def shutdown(self):
         self.client_socket.close()

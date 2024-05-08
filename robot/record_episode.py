@@ -135,8 +135,11 @@ def main(args):
         # print("tdsr - t0: ", tdsr-t0)
         # print("t1 - tdsr: ", t1-tdsr)
         # print("t2 - t1: ", t2-t1)
-        if t2-t1>0.1:
+        if tdsr-t0>0.1:
             print("DSR commad duration is too long (over 100ms)")
+
+        if rospy.is_shutdown():
+            break
         rate.sleep()
     
     print(f'Avg Control Frequency [Hz]: {dsr.tick / (time.time() - time0)}')
@@ -144,7 +147,9 @@ def main(args):
     # stop dsr
     dsr.stop()
     # open gripper
-    gripper.send_gripper_pos(0.0)
+    # gripper.send_gripper_pos(0.0)
+    gripper.open()
+    time.sleep(0.1)
     gripper.stop_control_loop = True
     # shutdown controllers
     # dsr.shutdown()
@@ -258,7 +263,7 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task_name', action='store', type=str, help='Task name.', default='dsr_single_block_sorting', required=False)
+    parser.add_argument('--task_name', action='store', type=str, help='Task name.', default='dsr_block_collect', required=False)
     parser.add_argument('--episode_idx', action='store', type=int, help='Episode index.', default=None, required=False)
     main(vars(parser.parse_args())) # TODO
     # debug()
