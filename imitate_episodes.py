@@ -665,7 +665,7 @@ if __name__ == '__main__':
     parser.add_argument('--kl_weight', action='store', type=int, default=10, help='KL Weight', required=False)
     parser.add_argument('--chunk_size', action='store', type=int, default=60, help='chunk_size', required=False)
     parser.add_argument('--hidden_dim', action='store', type=int, default=512, help='hidden_dim', required=False)
-    parser.add_argument('--dim_feedforward', action='store', type=int, default=3200, help='dim_feedforward', required=False)
+    parser.add_argument('--dim_feedforward', action='store', type=int, default=2048, help='dim_feedforward', required=False)
     parser.add_argument('--temporal_agg', action='store_true')
     parser.add_argument('--use_vq', action='store_true')
     parser.add_argument('--vq_class', action='store', type=int, help='vq_class')
