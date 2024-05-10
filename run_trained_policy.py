@@ -16,7 +16,7 @@ from scipy.spatial.transform import Rotation
 import h5py
 import pickle
 import argparse
-from constants import *
+from robot.constants import *
 import cv2
 from tqdm import tqdm
 
@@ -24,9 +24,9 @@ from policy import ACTPolicy, CNNMLPPolicy, DiffusionPolicy
 import torch
 from einops import rearrange
 
-from metaquest_teleop import drlControl
-from schunk_gripper_control import gripperControl
-from robot_utils import ImageRecorder
+from robot.metaquest_teleop import drlControl
+from robot.schunk_gripper_control import gripperControl
+from robot.robot_utils import ImageRecorder
 # for single robot 
 try:
     ROBOT_ID     = rospy.get_param('/dsr/robot_id')
@@ -45,16 +45,14 @@ def main(args):
     max_timesteps = task_config['episode_len']
     camera_names = task_config['camera_names']
     
-    if args['episode_idx'] is not None:
-        episode_idx = args['episode_idx']
-    else:
-        episode_idx = get_auto_index(dataset_dir)
+
     overwrite = False
 
-    dataset_name = f'episode_{episode_idx}'
+    dataset_name = 'real_robot_evaluation'
     print(args['task_name'] + ', ' + dataset_name + '\n' )
 
-    rate = rospy.Rate(HZ)
+    # rate = rospy.Rate(HZ)
+    rate = rospy.Rate(20)
 
     # load model parameters
     ckpt_dir = args['ckpt_dir']
@@ -73,10 +71,17 @@ def main(args):
     with open(stats_path, 'rb') as f:
         stats = pickle.load(f)
 
+    # prepare action list for temporal ensemble
+    num_queries = policy_config['num_queries']
+    all_time_actions = torch.zeros([max_timesteps, max_timesteps+num_queries, 7]).cuda()
+    
+
+
+    # print('---dataset stats--- \n', stats)
     # if policy_class == 'Diffusion':
     #     post_process = lambda a: ((a + 1) / 2) * (stats['action_max'] - stats['action_min']) + stats['action_min']
     # else:
-    pre_process = lambda s_qpos: (s_qpos - stats['qpos_mean']) / stats['qpos_std']
+    pre_process = lambda s: (s - stats['state_mean']) / stats['state_std']
     post_process = lambda a: a * stats['action_std'] + stats['action_mean']
 
     # saving dataset
@@ -140,6 +145,8 @@ def main(args):
         dsr_state_euler = dsr.get_euler()
         gripper_state = gripper.get_state()
 
+        # if t%60 == 0:
+        # t1 = time.time()
         with torch.inference_mode():
             # get input data
             robot_state = np.concatenate([dsr_state_xpos, dsr_state_euler, gripper_state])
@@ -158,20 +165,52 @@ def main(args):
 
             robot_state = torch.from_numpy(robot_state).float().cuda().unsqueeze(0)
             cam_images = torch.from_numpy(all_cam_images / 255.0).float().cuda().unsqueeze(0)
-            
+            # t2 = time.time()
             # policy inference
-            all_action = policy(robot_state, cam_images)
-            raw_action = all_action
+            all_actions = policy(robot_state, cam_images)
+            all_time_actions[[t], t:t+num_queries, :] = all_actions
+            actions_for_curr_step = all_time_actions[:, t, :]
+            actions_populated = torch.all(actions_for_curr_step != 0, axis=1)
+            actions_for_curr_step = actions_for_curr_step[actions_populated]
+            k = 0.01
+            exp_weights = np.exp(-k * np.arange(len(actions_for_curr_step)))
+            exp_weights = exp_weights / exp_weights.sum()
+            exp_weights = torch.from_numpy(exp_weights).cuda().unsqueeze(dim=1)
+            raw_action = (actions_for_curr_step * exp_weights).sum(dim=0, keepdim=True)
+
+            t3 = time.time()
+            raw_action = raw_action.squeeze(0).cpu().numpy()
             action = post_process(raw_action)
-            print('all_action: ', all_action)
-            print('post action: ', action)
+            # print('all_action: ', all_action)
+            print('action: ', action)
 
-            t1 = time.time() #
+            # dsr.set_action(action[0][:6])
+            # gripper.set_action(action[0][-1])
+            # for i in range(10):
+            #     t1 = time.time()
+            #     dsr.step()
+            #     t2 = time.time()
+            
+            t4 = time.time() #
 
-            dsr_action = dsr.get_action()
-            gripper_action = gripper.get_action()
-            print('dsr_action: ', dsr_action)
-            print('gripper_action: ', gripper_action)
+            # 
+
+            # print("t1 - t0: ", t1-t0)
+            # print("t2 - t1: ", t2-t1)
+            # print("t3 - t2: ", t3-t2)
+            # print("t4 - t3: ", t4-t3)
+            # print("t4 - t0: ", t4-t0)
+            if rospy.is_shutdown():
+                break
+        
+        ## command robot
+        dsr.set_action(action[:6])
+        gripper.set_action(action[-1])
+
+        dsr_action = dsr.get_action()
+        gripper_action = gripper.get_action()
+        # print('dsr_action: ', dsr_action)
+        # print('gripper_action: ', gripper_action)
 
         data_dict['/observations/xpos'].append(dsr_state_xpos)
         data_dict['/observations/euler'].append(dsr_state_euler)
@@ -182,22 +221,25 @@ def main(args):
         for cam_name in camera_names:
             data_dict[f'/observations/images/{cam_name}'].append((image_recorder.get_images())[cam_name])
             data_dict[f'/observations/depth_images/{cam_name}'].append((image_recorder.get_depth_images())[cam_name])
-        t2 = time.time() #
-        actual_dt_history.append([t0, t1, t2])
+        # t2 = time.time() #
+        # actual_dt_history.append([t0, t1, t2])
 
         # print("tdsr - t0: ", tdsr-t0)
         # print("t1 - tdsr: ", t1-tdsr)
         # print("t2 - t1: ", t2-t1)
-        if t2-t1>0.1:
-            print("DSR commad duration is too long (over 100ms)")
+        # if t2-t1>0.1:
+        #     print("DSR commad duration is too long (over 100ms)")
+        
         rate.sleep()
+        
     
     print(f'Avg Control Frequency [Hz]: {dsr.tick / (time.time() - time0)}')
 
     # stop dsr
     dsr.stop()
     # open gripper
-    gripper.send_gripper_pos(0.0)
+    gripper.open()
+    time.sleep(0.1)
     gripper.stop_control_loop = True
     # shutdown controllers
     # dsr.shutdown()
@@ -322,7 +364,6 @@ def make_policy(policy_class, policy_config):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--ckpt_dir', action='store', type=str, help='Check Point Directory.', required=True)
-    parser.add_argument('--task_name', action='store', type=str, help='Task name.', default='dsr_single_block_sorting', required=False)
-    parser.add_argument('--episode_idx', action='store', type=int, help='Episode index.', default=None, required=False)
+    parser.add_argument('--task_name', action='store', type=str, help='Task name.', default='dsr_block_collect', required=False)
     main(vars(parser.parse_args())) # TODO
     # debug()

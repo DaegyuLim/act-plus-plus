@@ -236,6 +236,11 @@ class gripperControl:
             self.step()
             rate.sleep()
 
+    def open(self):
+        self.gripper_command = 0
+
+    def close(self):
+        self.gripper_command = 1
 
     def get_state(self):
         return np.array([self.gripper_state])
@@ -265,7 +270,6 @@ class gripperControl:
         gripper_command_bytes = head_bytes + gripper_position_command + velocity_bytes + force_bytes
         
         gripper_command_bytes += self.calculator.checksum(gripper_command_bytes).to_bytes(2, 'little', signed=False)
-        
         self.ser.write(gripper_command_bytes)
 
     def ovr2ros_right_hand_inputs_callback(self, data):    

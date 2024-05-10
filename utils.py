@@ -31,9 +31,11 @@ class EpisodicDataset(torch.utils.data.Dataset):
             self.augment_images = True
         else:
             self.augment_images = False
-        self.transformations = True
+        self.transformations = False
+        self.use_depth = True
         self.__getitem__(0) # initialize self.is_sim and self.transformations
         self.is_sim = False
+        
 
     # def __len__(self):
     #     return sum(self.episode_len)
@@ -49,7 +51,6 @@ class EpisodicDataset(torch.utils.data.Dataset):
         episode_id, start_ts = self._locate_transition(index)
         dataset_path = self.dataset_path_list[episode_id]
         try:
-            
             with h5py.File(dataset_path, 'r') as root:
                 try: # some legacy data does not have this attribute
                     is_sim = root.attrs['sim']
@@ -79,10 +80,24 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 
                 
                 if compressed:
-                    for cam_name in image_dict.keys():
+                    for cam_name in image_dict.keys():                      
                         decompressed_image = cv2.imdecode(image_dict[cam_name], 1)
+                        # cv2.imshow('decoding', decompressed_image)
+                        # cv2.waitKey()
                         image_dict[cam_name] = np.array(decompressed_image)
 
+                
+                if self.use_depth:
+                    depth_image_dict = dict()
+                    for cam_name in self.camera_names:
+                        depth_image_dict[cam_name] = root[f'/observations/depth_images/{cam_name}'][start_ts]
+                    
+                    if compressed:
+                        for cam_name in depth_image_dict.keys():
+                            decompressed_depth_image = cv2.imdecode(depth_image_dict[cam_name], 0)
+                            depth_image_dict[cam_name] = np.array(decompressed_depth_image)
+                
+                # print('depth_image_dict[cam_name].size: ', np.shape( np.array(depth_image_dict[cam_name])) )
                 # get all actions after and including start_ts
                 if is_sim:
                     action = action[start_ts:]
@@ -104,6 +119,11 @@ class EpisodicDataset(torch.utils.data.Dataset):
             all_cam_images = []
             for cam_name in self.camera_names:
                 all_cam_images.append(image_dict[cam_name])
+            
+            if self.use_depth:
+                for cam_name in self.camera_names:
+                    all_cam_images.append(depth_image_dict[cam_name])
+
             all_cam_images = np.stack(all_cam_images, axis=0)
 
             # construct observations
@@ -116,7 +136,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
             image_data = torch.einsum('k h w c -> k c h w', image_data)
 
             # augmentation
-            if self.transformations is None:
+            if self.transformations:
                 print('Initializing transformations')
                 original_size = image_data.shape[2:]
                 ratio = 0.95
@@ -225,7 +245,7 @@ def BatchSampler(batch_size, episode_len_l, sample_weights):
             batch.append(step_idx)
         yield batch
 
-def load_data(dataset_dir_l, name_filter, camera_names, batch_size_train, batch_size_val, chunk_size, skip_mirrored_data=False, load_pretrain=False, policy_class=None, stats_dir_l=None, sample_weights=None, train_ratio=0.99):
+def load_data(dataset_dir_l, name_filter, camera_names, batch_size_train, batch_size_val, chunk_size, skip_mirrored_data=False, load_pretrain=False, policy_class=None, stats_dir_l=None, sample_weights=None, train_ratio=0.9):
     if type(dataset_dir_l) == str:
         dataset_dir_l = [dataset_dir_l]
     dataset_path_list_list = [find_all_hdf5(dataset_dir, skip_mirrored_data) for dataset_dir in dataset_dir_l]

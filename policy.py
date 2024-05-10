@@ -231,7 +231,8 @@ class ACTPolicy(nn.Module):
             return loss_dict
         else: # inference time
             a_hat, is_pad_hat, (_, _), _, _ = self.model(robot_state, image, env_state, vq_sample=vq_sample) # no action, sample from prior
-            return a_hat, is_pad_hat
+            # return a_hat, is_pad_hat
+            return a_hat
 
     def configure_optimizers(self):
         return self.optimizer

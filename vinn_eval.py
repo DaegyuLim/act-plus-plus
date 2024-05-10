@@ -14,7 +14,7 @@ from torchvision import transforms
 from utils import set_seed, sample_box_pose
 # from imitate_episodes import get_image
 from sim_env import BOX_POSE
-from constants import DT
+from robot.constants import DT
 from imitate_episodes import save_videos
 from einops import rearrange
 import time
