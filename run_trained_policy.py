@@ -48,8 +48,8 @@ def main(args):
     
     temporal_ensemble = True
     use_depth = True
-
     overwrite = False
+
 
     dataset_name = 'real_robot_evaluation'
     print(args['task_name'] + ', ' + dataset_name + '\n' )
@@ -77,6 +77,11 @@ def main(args):
 
     # prepare action list for temporal ensemble
     num_queries = policy_config['num_queries']
+    num_robot_obs = policy_config['num_robot_observations']
+    num_image_obs = policy_config['num_image_observations']
+    image_obs_every = policy_config['image_observation_skip']
+
+    robot_obs_history = np.zeros((num_robot_obs, 7), dtype=np.float32)
     all_time_actions = torch.zeros([max_timesteps, max_timesteps+num_queries, 7]).cuda()
     
 
@@ -149,6 +154,11 @@ def main(args):
         dsr_state_euler = dsr.get_euler()
         gripper_state = gripper.get_state()
 
+        #initialize
+        if t == 0:
+            robot_state = np.concatenate([dsr_state_xpos, dsr_state_euler, gripper_state])
+            robot_state = pre_process(robot_state)
+            robot_obs_history[:] = robot_state
         # if t%60 == 0:
         # t1 = time.time()
         with torch.inference_mode():
@@ -156,6 +166,10 @@ def main(args):
             robot_state = np.concatenate([dsr_state_xpos, dsr_state_euler, gripper_state])
             robot_state = pre_process(robot_state)
 
+            robot_obs_history[1:] = robot_obs_history[:-1]
+            robot_obs_history[0] = robot_state
+
+            robot_obs_history_flat = robot_obs_history.reshape([-1])
             image_dict = dict()
             for cam_name in camera_names:
                 image_dict[cam_name] =  (image_recorder.get_images())[cam_name]
@@ -184,11 +198,11 @@ def main(args):
             all_cam_images = np.stack(all_cam_images, axis=0)
 
 
-            robot_state = torch.from_numpy(robot_state).float().cuda().unsqueeze(0)
+            robot_obs_history_flat = torch.from_numpy(robot_obs_history_flat).float().cuda().unsqueeze(0)
             cam_images = torch.from_numpy(all_cam_images / 255.0).float().cuda().unsqueeze(0)
             # t2 = time.time()
             # policy inference
-            all_actions = policy(robot_state, cam_images)
+            all_actions = policy(robot_obs_history_flat, cam_images)
             if temporal_ensemble:
                 all_time_actions[[t], t:t+num_queries, :] = all_actions
                 actions_for_curr_step = all_time_actions[:, t, :]
