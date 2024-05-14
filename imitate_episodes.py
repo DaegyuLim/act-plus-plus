@@ -38,6 +38,7 @@ def main(args):
     # command line parameters
     is_eval = args['eval']
     is_wandb = args['wandb']
+    use_depth = args['use_depth']
     ckpt_dir = args['ckpt_dir']
     policy_class = args['policy_class']
     onscreen_render = args['onscreen_render']
@@ -74,7 +75,7 @@ def main(args):
     backbone = 'resnet18'
     if policy_class == 'ACT':
         enc_layers = 4
-        dec_layers = 7
+        dec_layers = 6
         nheads = 8
         policy_config = {'lr': args['lr'],
                          'num_queries': args['chunk_size'],
@@ -145,7 +146,8 @@ def main(args):
         'real_robot': not is_sim,
         'load_pretrain': args['load_pretrain'],
         'actuator_config': actuator_config,
-        'wandb': is_wandb
+        'wandb': is_wandb,
+        'use_depth': use_depth
     }
 
     if not os.path.isdir(ckpt_dir):
@@ -170,7 +172,7 @@ def main(args):
         print()
         exit()
 
-    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, name_filter, camera_names, batch_size_train, batch_size_val, args['chunk_size'], args['robot_obs_size'], args['img_obs_size'], args['img_obs_every'], args['skip_mirrored_data'], config['load_pretrain'], policy_class, stats_dir_l=stats_dir, sample_weights=sample_weights, train_ratio=train_ratio, use_depth=config['use_depth'])
+    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, name_filter, camera_names, batch_size_train, batch_size_val, args['chunk_size'], args['robot_obs_size'], args['img_obs_size'], args['img_obs_every'], args['skip_mirrored_data'], config['load_pretrain'], policy_class, stats_dir_l=stats_dir, sample_weights=sample_weights, train_ratio=train_ratio, use_depth=use_depth)
 
     # save dataset stats
     stats_path = os.path.join(ckpt_dir, f'dataset_stats.pkl')
@@ -657,7 +659,7 @@ if __name__ == '__main__':
     parser.add_argument('--task_name', action='store', type=str, default='dsr_block_collect', help='task_name', required=True)
     parser.add_argument('--batch_size', action='store', type=int, default=8, help='batch_size', required=True)
     parser.add_argument('--seed', action='store', type=int, default=0, help='seed', required=True)
-    parser.add_argument('--num_steps', action='store', type=int, default=2000, help='num_steps', required=True)
+    parser.add_argument('--num_steps', action='store', type=int, default=10000, help='num_steps', required=True)
 
     parser.add_argument('--lr', action='store', type=float, default=1e-5, help='lr', required=False)
     parser.add_argument('--load_pretrain', action='store_true', default=False)
@@ -674,13 +676,13 @@ if __name__ == '__main__':
     # for ACT
     parser.add_argument('--kl_weight', action='store', type=int, default=10, help='KL Weight', required=False)
     parser.add_argument('--chunk_size', action='store', type=int, default=180, help='chunk_size', required=False)
-    parser.add_argument('--robot_obs_size', action='store', type=int, default=2, help='robot state observation_size', required=False)
-    parser.add_argument('--img_obs_size', action='store', type=int, default=2, help='image observation_size', required=False)
-    parser.add_argument('--img_obs_every', action='store', type=int, default=2, help='image observation every n steps', required=False)
+    parser.add_argument('--robot_obs_size', action='store', type=int, default=60, help='robot state observation_size', required=False)
+    parser.add_argument('--img_obs_size', action='store', type=int, default=1, help='image observation_size', required=False)
+    parser.add_argument('--img_obs_every', action='store', type=int, default=1, help='image observation every n steps', required=False)
     parser.add_argument('--use_depth', action='store_true', default=False)
 
-    parser.add_argument('--hidden_dim', action='store', type=int, default=512, help='hidden_dim', required=False)
-    parser.add_argument('--dim_feedforward', action='store', type=int, default=2048, help='dim_feedforward', required=False)
+    parser.add_argument('--hidden_dim', action='store', type=int, default=256, help='hidden_dim', required=False)
+    parser.add_argument('--dim_feedforward', action='store', type=int, default=1024, help='dim_feedforward', required=False)
     parser.add_argument('--temporal_agg', action='store_true')
     parser.add_argument('--use_vq', action='store_true')
     parser.add_argument('--vq_class', action='store', type=int, help='vq_class')
