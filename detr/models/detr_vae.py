@@ -160,9 +160,10 @@ class DETRVAE(nn.Module):
             # Image observation features and position embeddings
             all_cam_features = []
             all_cam_pos = []
-            for cam_id, cam_name in enumerate(self.camera_names):
+            print('len(self.backbones): ', len(self.backbones))
+            for i in range(len(self.backbones)):
                 for t in range(self.num_image_observations):
-                    features, pos = self.backbones[cam_id](image[:, cam_id, t])
+                    features, pos = self.backbones[i](image[:, i, t])
                     features = features[0] # take the last layer feature
                     pos = pos[0]
                     all_cam_features.append(self.input_proj(features))
@@ -272,7 +273,7 @@ def build_encoder(args):
 
 
 def build(args):
-    state_dim = 7 # TODO hardcode
+    state_dim = args.state_dim # TODO hardcode
 
     # From state
     # backbone = None # from state for now, no need for conv nets
@@ -281,6 +282,11 @@ def build(args):
     for _ in args.camera_names:
         backbone = build_backbone(args)
         backbones.append(backbone)
+
+    if args.use_depth:
+        for _ in args.camera_names:
+            backbone = build_backbone(args)
+            backbones.append(backbone)
 
     transformer = build_transformer(args)
 
