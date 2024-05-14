@@ -19,6 +19,7 @@ import argparse
 from robot.constants import *
 import cv2
 from tqdm import tqdm
+from scipy.spatial.transform import Rotation
 
 from policy import ACTPolicy, CNNMLPPolicy, DiffusionPolicy
 import torch
@@ -47,14 +48,16 @@ def main(args):
     
     temporal_ensemble = True
     record_data = False
-    use_depth = True
+    use_depth = False
     overwrite = False
+    reletive_obs_mode = False
+    reletive_action_mode = False
     
     dataset_name = 'real_robot_evaluation'
     print(args['task_name'] + ', ' + dataset_name + '\n' )
 
-    # rate = rospy.Rate(HZ)
-    rate = rospy.Rate(20)
+    rate = rospy.Rate(HZ)
+    # rate = rospy.Rate(20)
 
     # load model parameters
     ckpt_dir = args['ckpt_dir']
@@ -81,8 +84,12 @@ def main(args):
     image_obs_every = policy_config['image_observation_skip']
 
     image_obs_history = dict()
-    robot_obs_history = np.zeros((num_robot_obs, 7), dtype=np.float32)
-    all_time_actions = torch.zeros([max_timesteps, max_timesteps+num_queries, 7]).cuda()
+    if reletive_obs_mode:
+        robot_obs_history = np.zeros((num_robot_obs+1, 7), dtype=np.float32)
+        relative_robot_obs_history = np.zeros((num_robot_obs, 7), dtype=np.float32)
+    else:
+        robot_obs_history = np.zeros((num_robot_obs, 7), dtype=np.float32)
+    all_time_actions = np.zeros((max_timesteps, max_timesteps+num_queries, 7), dtype=np.float32)
     
 
 
@@ -148,8 +155,9 @@ def main(args):
 
     #initialize
     robot_state = np.concatenate([dsr.get_xpos(), dsr.get_euler(), gripper.get_state()])
-    robot_state = pre_process(robot_state)
+    # robot_state = pre_process(robot_state)
     robot_obs_history[:] = robot_state
+
     image_sampling = range(0, (num_image_obs-1)*image_obs_every+1, image_obs_every)
     for cam_name in camera_names:
         first_image = rearrange(image_recorder.get_images()[cam_name], 'h w c -> c h w')
@@ -162,21 +170,43 @@ def main(args):
         dsr_state_xpos = dsr.get_xpos()
         dsr_state_euler = dsr.get_euler()
         gripper_state = gripper.get_state()
-
+        dsr_rotation = Rotation.from_euler("ZYZ", dsr_state_euler, degrees=True)
 
         # if t%60 == 0:
-        # t1 = time.time()
+        t1 = time.time()
         with torch.inference_mode():
-            # get input data
+            ### get input data
+            ## ROBOT STATE INPUT
             robot_state = np.concatenate([dsr_state_xpos, dsr_state_euler, gripper_state])
-            robot_state = pre_process(robot_state)
-
+            
             if num_robot_obs >1:
                 robot_obs_history[1:] = robot_obs_history[:-1]
             robot_obs_history[0] = robot_state
 
-            robot_obs_history_flat = robot_obs_history.reshape([-1])
+            # print('robot_obs_history: \n', robot_obs_history)
+            if reletive_obs_mode:
+                reference_state_pos = robot_obs_history[0, 0:3]
+                reference_state_euler = robot_obs_history[0, 3:6]
+                reference_state_rotation = Rotation.from_euler("ZYZ", reference_state_euler, degrees=True)
+                for t in range(num_robot_obs):
+                    # orientation
+                    robot_rotation = Rotation.from_euler("ZYZ", robot_obs_history[t+1, 3:6], degrees=True)
+                    robot_rotm = reference_state_rotation.as_matrix().transpose() * robot_rotation.as_matrix()
+                    rel_robot_rotation = Rotation.from_matrix(robot_rotm)
+                    relative_robot_obs_history[t, 3:6] = rel_robot_rotation.as_rotvec()
+                    # position
+                    relative_robot_obs_history[t, 0:3] = (reference_state_rotation.as_matrix().transpose()).dot(robot_obs_history[t+1, 0:3] - reference_state_pos)
+                # pass gripper position
+                relative_robot_obs_history[:, 6] = robot_obs_history[:-1, 6]
+                # print('relative_robot_obs_history pre: \n', relative_robot_obs_history)
+                relative_robot_obs_history = pre_process(relative_robot_obs_history)
+                # print('relative_robot_obs_history post: \n', relative_robot_obs_history)
+                robot_obs_history_flat = relative_robot_obs_history.reshape([-1])
+            else:
+                robot_obs_history_flat = pre_process(robot_obs_history)
+                robot_obs_history_flat = robot_obs_history_flat.reshape([-1])
             
+            ## CAMERA INPUT
             for cam_name in camera_names:
                 current_image = rearrange(image_recorder.get_images()[cam_name], 'h w c -> c h w')
                 
@@ -189,35 +219,58 @@ def main(args):
             all_cam_images = []
             for cam_name in camera_names:
                 all_cam_images.append(np.array(image_obs_history[cam_name])[image_sampling])
-                
+
             all_cam_images = np.stack(all_cam_images, axis=0)
 
-
+            
+            # move data into GPU
             robot_obs_history_flat = torch.from_numpy(robot_obs_history_flat).float().cuda().unsqueeze(0)
             cam_images = torch.from_numpy(all_cam_images / 255.0).float().cuda().unsqueeze(0)
-            # t2 = time.time()
+            
             # policy inference
-            all_actions = policy(robot_obs_history_flat, cam_images)
+            all_actions = policy(robot_obs_history_flat, cam_images) # dim: [1, chunk_size, action_dim]
+            all_actions = all_actions.cpu().numpy()
+
+            all_actions = post_process(all_actions)
+
+            t2 = time.time()
+            if reletive_action_mode:
+                dsr_state_rotm = dsr_rotation.as_matrix()
+                rel_all_actions = all_actions[0]
+                rel_all_actions_rotation = Rotation.from_rotvec(rel_all_actions[:, 3:6])
+                all_actions_rotm = dsr_state_rotm * rel_all_actions_rotation.as_matrix()[:]
+                all_actions_rotation = Rotation.from_matrix(all_actions_rotm)
+                # position
+                for i in range(num_queries):
+                    all_actions[0, i, 0:3] = dsr_state_xpos[:] + dsr_state_rotm.dot(rel_all_actions[i, 0:3])
+                    # euler
+                    all_actions[0, i, 3:6] = all_actions_rotation[i].as_euler("ZYZ", degrees=True)
+            t3 = time.time()
+            
+            print('all_actions: \n', all_actions[:30])
             if temporal_ensemble:
                 all_time_actions[[t], t:t+num_queries, :] = all_actions
                 actions_for_curr_step = all_time_actions[:, t, :]
-                actions_populated = torch.all(actions_for_curr_step != 0, axis=1)
+                actions_populated = np.all(actions_for_curr_step != 0, axis=1)
                 actions_for_curr_step = actions_for_curr_step[actions_populated]
-                k = 0.05
+                k = 0.01
                 exp_weights = np.exp(-k * np.arange(len(actions_for_curr_step)))
                 exp_weights = exp_weights / exp_weights.sum()
-                exp_weights = torch.from_numpy(exp_weights).cuda().unsqueeze(dim=1)
-                raw_action = (actions_for_curr_step * exp_weights).sum(dim=0, keepdim=True)
+                exp_weights = np.expand_dims(exp_weights, axis=1)
+                # print('exp_weight: ', exp_weights)
+                action = np.sum(actions_for_curr_step * exp_weights, axis=0, keepdims=True)
             else:
                 # print('all_actions shape: ', all_actions.size())
-                raw_action = all_actions[0][0][:]
-                # print('raw_action: ', raw_action)
-            t3 = time.time()
-            raw_action = raw_action.squeeze(0).cpu().numpy()
-            action = post_process(raw_action)
+                action = all_actions[0][0][:]
+                # print('action: ', action)
+            
+            action = np.squeeze(action, axis=0)
+            
             # print('all_action: ', all_action)
-            print('action: ', action)
+        
 
+
+            print('action: ', action)
             # dsr.set_action(action[0][:6])
             # gripper.set_action(action[0][-1])
             # for i in range(10):
