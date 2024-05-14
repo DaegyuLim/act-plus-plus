@@ -160,7 +160,6 @@ class DETRVAE(nn.Module):
             # Image observation features and position embeddings
             all_cam_features = []
             all_cam_pos = []
-            print('len(self.backbones): ', len(self.backbones))
             for i in range(len(self.backbones)):
                 for t in range(self.num_image_observations):
                     features, pos = self.backbones[i](image[:, i, t])

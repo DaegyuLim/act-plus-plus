@@ -67,9 +67,9 @@ def get_args_parser():
     parser.add_argument('--robot_obs_size', action='store', type=int, default=2, help='robot state observation_size', required=False)
     parser.add_argument('--img_obs_size', action='store', type=int, default=2, help='image observation_size', required=False)
     parser.add_argument('--img_obs_every', action='store', type=int, default=2, help='image observation every n steps', required=False)
+    parser.add_argument('--use_depth', action='store_true')
 
     parser.add_argument('--temporal_agg', action='store_true')
-    
     parser.add_argument('--use_vq', action='store_true')
     parser.add_argument('--vq_class', action='store', type=int, help='vq_class', required=False)
     parser.add_argument('--vq_dim', action='store', type=int, help='vq_dim', required=False)

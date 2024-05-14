@@ -38,6 +38,7 @@ def main(args):
     # command line parameters
     is_eval = args['eval']
     is_wandb = args['wandb']
+    use_depth = args['use_depth']
     ckpt_dir = args['ckpt_dir']
     policy_class = args['policy_class']
     onscreen_render = args['onscreen_render']
@@ -145,7 +146,8 @@ def main(args):
         'real_robot': not is_sim,
         'load_pretrain': args['load_pretrain'],
         'actuator_config': actuator_config,
-        'wandb': is_wandb
+        'wandb': is_wandb,
+        'use_depth': use_depth
     }
 
     if not os.path.isdir(ckpt_dir):
@@ -170,7 +172,7 @@ def main(args):
         print()
         exit()
 
-    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, name_filter, camera_names, batch_size_train, batch_size_val, args['chunk_size'], args['robot_obs_size'], args['img_obs_size'], args['img_obs_every'], args['skip_mirrored_data'], config['load_pretrain'], policy_class, stats_dir_l=stats_dir, sample_weights=sample_weights, train_ratio=train_ratio)
+    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, name_filter, camera_names, batch_size_train, batch_size_val, args['chunk_size'], args['robot_obs_size'], args['img_obs_size'], args['img_obs_every'], args['skip_mirrored_data'], config['load_pretrain'], policy_class, stats_dir_l=stats_dir, sample_weights=sample_weights, train_ratio=train_ratio, use_depth=use_depth)
 
     # save dataset stats
     stats_path = os.path.join(ckpt_dir, f'dataset_stats.pkl')
@@ -677,6 +679,7 @@ if __name__ == '__main__':
     parser.add_argument('--robot_obs_size', action='store', type=int, default=60, help='robot state observation_size', required=False)
     parser.add_argument('--img_obs_size', action='store', type=int, default=1, help='image observation_size', required=False)
     parser.add_argument('--img_obs_every', action='store', type=int, default=1, help='image observation every n steps', required=False)
+    parser.add_argument('--use_depth', action='store_true', default=False)
 
     parser.add_argument('--hidden_dim', action='store', type=int, default=256, help='hidden_dim', required=False)
     parser.add_argument('--dim_feedforward', action='store', type=int, default=1024, help='dim_feedforward', required=False)
