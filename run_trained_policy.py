@@ -34,7 +34,6 @@ except:
     ROBOT_ID     = "dsr_l"
 ROBOT_MODEL = "a0509"
 
-SAVE_DATA = False
 
 def main(args):
     image_recorder = ImageRecorder(init_node=False)
@@ -47,23 +46,23 @@ def main(args):
     camera_names = task_config['camera_names']
     
     temporal_ensemble = True
+    record_data = False
     use_depth = True
     overwrite = False
-
-
+    
     dataset_name = 'real_robot_evaluation'
     print(args['task_name'] + ', ' + dataset_name + '\n' )
 
-    rate = rospy.Rate(HZ)
-    # rate = rospy.Rate(20)
+    # rate = rospy.Rate(HZ)
+    rate = rospy.Rate(20)
 
     # load model parameters
     ckpt_dir = args['ckpt_dir']
-    # ckpt_path = os.path.join(ckpt_dir, 'policy_best.ckpt')
     ckpt_path = os.path.join(ckpt_dir, 'policy_last.ckpt')
     config_path = os.path.join(ckpt_dir, 'config.pkl')
     with open(config_path, 'rb') as f:
         config = pickle.load(f)
+        print('config: \n', config)
     policy_class = config['policy_class']
     policy_config = config['policy_config']
     policy = make_policy(policy_class, policy_config)
@@ -81,6 +80,7 @@ def main(args):
     num_image_obs = policy_config['num_image_observations']
     image_obs_every = policy_config['image_observation_skip']
 
+    image_obs_history = dict()
     robot_obs_history = np.zeros((num_robot_obs, 7), dtype=np.float32)
     all_time_actions = torch.zeros([max_timesteps, max_timesteps+num_queries, 7]).cuda()
     
@@ -146,6 +146,15 @@ def main(args):
     gripper_thread.daemon = True
     gripper_thread.start()
 
+    #initialize
+    robot_state = np.concatenate([dsr.get_xpos(), dsr.get_euler(), gripper.get_state()])
+    robot_state = pre_process(robot_state)
+    robot_obs_history[:] = robot_state
+    image_sampling = range(0, (num_image_obs-1)*image_obs_every+1, image_obs_every)
+    for cam_name in camera_names:
+        first_image = rearrange(image_recorder.get_images()[cam_name], 'h w c -> c h w')
+        image_obs_history[cam_name] = np.repeat(first_image[np.newaxis, :, :, :], (num_image_obs-1)*image_obs_every + 1, axis=0) #0xxx0xxx0
+                
     print('Start!')
     time0 = time.time()
     for t in tqdm(range(max_timesteps)):
@@ -154,11 +163,7 @@ def main(args):
         dsr_state_euler = dsr.get_euler()
         gripper_state = gripper.get_state()
 
-        #initialize
-        if t == 0:
-            robot_state = np.concatenate([dsr_state_xpos, dsr_state_euler, gripper_state])
-            robot_state = pre_process(robot_state)
-            robot_obs_history[:] = robot_state
+
         # if t%60 == 0:
         # t1 = time.time()
         with torch.inference_mode():
@@ -166,35 +171,25 @@ def main(args):
             robot_state = np.concatenate([dsr_state_xpos, dsr_state_euler, gripper_state])
             robot_state = pre_process(robot_state)
 
-            robot_obs_history[1:] = robot_obs_history[:-1]
+            if num_robot_obs >1:
+                robot_obs_history[1:] = robot_obs_history[:-1]
             robot_obs_history[0] = robot_state
 
             robot_obs_history_flat = robot_obs_history.reshape([-1])
-            image_dict = dict()
-            for cam_name in camera_names:
-                image_dict[cam_name] =  (image_recorder.get_images())[cam_name]
-                image_dict[cam_name] = rearrange(image_dict[cam_name], 'h w c -> c h w')
-
-            # print('image_dict[cam_name].size: ', np.shape( np.array(image_dict[cam_name])) )
-
-            if use_depth:
-                depth_image_dict = dict()
-                for cam_name in camera_names:
-                    depth_image_dict[cam_name] = [(image_recorder.get_depth_images())[cam_name], (image_recorder.get_depth_images())[cam_name], (image_recorder.get_depth_images())[cam_name]]
-                    # depth_image_dict[cam_name][:, :, 1] = depth_image_dict[cam_name][:, :, 0]
-                    # depth_image_dict[cam_name][:, :, 2] = depth_image_dict[cam_name][:, :, 0]
-                    # depth_image_dict[cam_name] = rearrange(depth_image_dict[cam_name], 'h w c -> c h w')
             
-            # print('depth_image_dict[cam_name].size: ', np.shape( np.array(depth_image_dict[cam_name])) )
+            for cam_name in camera_names:
+                current_image = rearrange(image_recorder.get_images()[cam_name], 'h w c -> c h w')
+                
+                if num_image_obs >1:
+                    image_obs_history[cam_name][1:] =  image_obs_history[cam_name][:-1]
+                    image_obs_history[cam_name][0] = current_image
+                else:
+                    image_obs_history[cam_name][0] = current_image
 
             all_cam_images = []
             for cam_name in camera_names:
-                all_cam_images.append(image_dict[cam_name])
-
-            if use_depth:
-                for cam_name in camera_names:
-                    all_cam_images.append(depth_image_dict[cam_name])
-
+                all_cam_images.append(np.array(image_obs_history[cam_name])[image_sampling])
+                
             all_cam_images = np.stack(all_cam_images, axis=0)
 
 
@@ -208,7 +203,7 @@ def main(args):
                 actions_for_curr_step = all_time_actions[:, t, :]
                 actions_populated = torch.all(actions_for_curr_step != 0, axis=1)
                 actions_for_curr_step = actions_for_curr_step[actions_populated]
-                k = 0.02
+                k = 0.05
                 exp_weights = np.exp(-k * np.arange(len(actions_for_curr_step)))
                 exp_weights = exp_weights / exp_weights.sum()
                 exp_weights = torch.from_numpy(exp_weights).cuda().unsqueeze(dim=1)
@@ -221,9 +216,10 @@ def main(args):
             raw_action = raw_action.squeeze(0).cpu().numpy()
             action = post_process(raw_action)
             # print('all_action: ', all_action)
-            # print('action: ', action)
+            print('action: ', action)
 
-
+            # dsr.set_action(action[0][:6])
+            # gripper.set_action(action[0][-1])
             # for i in range(10):
             #     t1 = time.time()
             #     dsr.step()
@@ -245,12 +241,12 @@ def main(args):
         dsr.set_action(action[:6])
         gripper.set_action(action[-1])
 
-        dsr_action = dsr.get_action()
-        gripper_action = gripper.get_action()
-        # print('dsr_action: ', dsr_action)
-        # print('gripper_action: ', gripper_action)
+        if record_data:
+            dsr_action = dsr.get_action()
+            gripper_action = gripper.get_action()
+            # print('dsr_action: ', dsr_action)
+            # print('gripper_action: ', gripper_action)
 
-        if SAVE_DATA:
             data_dict['/observations/xpos'].append(dsr_state_xpos)
             data_dict['/observations/euler'].append(dsr_state_euler)
             data_dict['/observations/gripper_pos'].append(gripper_state)
@@ -283,11 +279,10 @@ def main(args):
     # shutdown controllers
     # dsr.shutdown()
     # gripper.shutdown()
-    
-    
-    COMPRESS = True
 
-    if SAVE_DATA:
+    if record_data:
+        COMPRESS = True
+
         if COMPRESS:
             # JPEG compression
             t0 = time.time()
@@ -301,6 +296,7 @@ def main(args):
                 compressed_depth_list = []
                 compressed_image_len.append([])
                 compressed_depth_len.append([])
+                
                 for image in image_list:
                     result, encoded_image = cv2.imencode('.jpg', image, encode_param) # 0.02 sec # cv2.imdecode(encoded_image, 1)
                     compressed_list.append(encoded_image)

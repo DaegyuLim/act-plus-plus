@@ -8,6 +8,7 @@ import cv2
 from time import time
 from torch.utils.data import TensorDataset, DataLoader
 import torchvision.transforms as transforms
+from scipy.spatial.transform import Rotation
 
 import IPython
 e = IPython.embed
@@ -16,7 +17,7 @@ def flatten_list(l):
     return [item for sublist in l for item in sublist]
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset_path_list, camera_names, norm_stats, episode_ids, episode_len, chunk_size, policy_class):
+    def __init__(self, dataset_path_list, camera_names, norm_stats, episode_ids, episode_len, chunk_size, robot_obs_size, img_obs_size, img_obs_skip, policy_class, use_depth):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.dataset_path_list = dataset_path_list
@@ -24,6 +25,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.norm_stats = norm_stats
         self.episode_len = episode_len
         self.chunk_size = chunk_size
+        self.robot_obs_size = robot_obs_size
+        self.img_obs_size = img_obs_size
+        self.img_obs_skip = img_obs_skip
         self.cumulative_len = np.cumsum(self.episode_len)
         self.max_episode_len = max(episode_len)
         self.policy_class = policy_class
@@ -31,9 +35,15 @@ class EpisodicDataset(torch.utils.data.Dataset):
             self.augment_images = True
         else:
             self.augment_images = False
-        self.transformations = True
+        self.transformations = False
+
+        self.use_depth = use_depth
+    
+        self.reletive_action_mode = True
+        self.reletive_obs_mode = True
         self.__getitem__(0) # initialize self.is_sim and self.transformations
         self.is_sim = False
+        
 
     # def __len__(self):
     #     return sum(self.episode_len)
@@ -48,8 +58,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         episode_id, start_ts = self._locate_transition(index)
         dataset_path = self.dataset_path_list[episode_id]
+        t0 = time()
         try:
-            
             with h5py.File(dataset_path, 'r') as root:
                 try: # some legacy data does not have this attribute
                     is_sim = root.attrs['sim']
@@ -68,57 +78,153 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 original_action_shape = action.shape
                 episode_len = original_action_shape[0]
                 # get observation at start_ts only
-                xpos = root['/observations/xpos'][start_ts]
-                euler = root['/observations/euler'][start_ts]
-                gripper_pos = root['/observations/gripper_pos'][start_ts]
-
-                robot_state = np.concatenate( [xpos, euler, gripper_pos] )
+                xpos = root['/observations/xpos'][()]
+                euler = root['/observations/euler'][()]
+                gripper_pos = root['/observations/gripper_pos'][()]
+                t1 = time()
+                
+                robot_state = np.concatenate( [xpos, euler, gripper_pos], axis=-1)
+                original_robot_shape = robot_state.shape
+                t2 = time()
+                # print('robot_state shape', original_robot_shape) # (2000, 7)
                 image_dict = dict()
+                img_sampling = np.clip( range(start_ts, start_ts - self.img_obs_skip*self.img_obs_size, -self.img_obs_skip), 0, self.max_episode_len)
+ 
                 for cam_name in self.camera_names:
-                    image_dict[cam_name] = root[f'/observations/images/{cam_name}'][start_ts]
-                
-                
+                    image_dict[cam_name] = np.array(root[f'/observations/images/{cam_name}'])[img_sampling]
+                t3 = time()
                 if compressed:
                     for cam_name in image_dict.keys():
-                        decompressed_image = cv2.imdecode(image_dict[cam_name], 1)
-                        image_dict[cam_name] = np.array(decompressed_image)
+                        decompressed_image_array = []
+                        for i in range(len(image_dict[cam_name])):
+                            decompressed_image = cv2.imdecode(image_dict[cam_name][i], 1)
+                            # cv2.imshow('decoding', decompressed_image)
+                            # cv2.waitKey()
+                            decompressed_image_array.append(decompressed_image)
+                        image_dict[cam_name] = np.array(decompressed_image_array)
+                        # print('image_dict[cam_name].shape', image_dict[cam_name].shape)
+                t4 = time()
+                
+                if self.use_depth:
+                    depth_image_dict = dict()
 
-                # get all actions after and including start_ts
-                if is_sim:
-                    action = action[start_ts:]
-                    action_len = episode_len - start_ts
-                else:
-                    action = action[max(0, start_ts - 1):] # hack, to make timesteps more aligned
-                    action_len = episode_len - max(0, start_ts - 1) # hack, to make timesteps more aligned
+                    for cam_name in self.camera_names:
+                        depth_image_dict[cam_name] = np.array(root[f'/observations/depth_images/{cam_name}'])[img_sampling]
 
+                    if compressed:
+                        for cam_name in depth_image_dict.keys():
+                            decompressed_depth_array = []
+                            for i in range(len(depth_image_dict[cam_name])):
+                                decompressed_depth = cv2.imdecode(depth_image_dict[cam_name][i], 1)
+                                # cv2.imshow('decoding', decompressed_depth)
+                                # cv2.waitKey()
+                                decompressed_depth_array.append(decompressed_depth)
+                            depth_image_dict[cam_name] = np.array(decompressed_image_array)
+                # print('depth_image_dict[cam_name].size: ', np.shape( np.array(depth_image_dict[cam_name])) )
+               
+                # get all actions after and including start_ts 
+                action = action[start_ts:] 
+                action_len = episode_len - start_ts 
+                # get all states before and including start_ts 
+                robot_state = robot_state[:start_ts+1] 
+                robot_state_len = start_ts+1 
+            
+            
             # self.is_sim = is_sim
             padded_action = np.zeros((self.max_episode_len, original_action_shape[1]), dtype=np.float32)
             padded_action[:action_len] = action
-            is_pad = np.zeros(self.max_episode_len)
+            is_pad = np.zeros(self.max_episode_len, dtype=np.bool_)
             is_pad[action_len:] = 1
 
             padded_action = padded_action[:self.chunk_size]
             is_pad = is_pad[:self.chunk_size]
 
+            padded_robot_state = np.zeros((self.max_episode_len, original_robot_shape[1]), dtype=np.float32)
+            padded_robot_state[:] = robot_state[0]
+            padded_robot_state[-robot_state_len:] = robot_state
+            
+            if self.reletive_obs_mode == False:
+                padded_robot_state = padded_robot_state[-self.robot_obs_size:]
+            else:
+                padded_robot_state = padded_robot_state[-(self.robot_obs_size+1):]
+            padded_robot_state = padded_robot_state[::-1] # padded_robot_state[0] is the current observation at start_ts
+            
+            t5 = time()
+            if self.reletive_action_mode:
+                reference_state_pos = padded_robot_state[0, 0:3]
+                reference_state_euler = padded_robot_state[0, 3:6]
+                reference_state_rotation = Rotation.from_euler("ZYZ", reference_state_euler, degrees=True)
+
+                for t in range(self.chunk_size):
+                    # orientation
+                    action_rotation = Rotation.from_euler("ZYZ", padded_action[t, 3:6], degrees=True)
+                    action_rotm = reference_state_rotation.as_matrix().transpose() * action_rotation.as_matrix()
+                    rel_action_rotation = Rotation.from_matrix(action_rotm)
+                    padded_action[t, 3:6] = rel_action_rotation.as_rotvec()
+                    # position
+                    padded_action[t, 0:3] = (reference_state_rotation.as_matrix().transpose()).dot(padded_action[t, 0:3] - reference_state_pos)
+                    # print('padded_action[t, 0:3]: ', padded_action[t, 0:3])
+                    # print( (reference_state_rotation.as_matrix()))
+                    # print( (reference_state_rotation.as_matrix().transpose()))
+
+            if self.reletive_obs_mode:
+                reference_state_pos = padded_robot_state[0, 0:3]
+                reference_state_euler = padded_robot_state[0, 3:6]
+                reference_state_rotation = Rotation.from_euler("ZYZ", reference_state_euler, degrees=True)
+                for t in range(self.robot_obs_size):
+                    # orientation
+                    robot_rotation = Rotation.from_euler("ZYZ", padded_robot_state[t+1, 3:6], degrees=True)
+                    robot_rotm = reference_state_rotation.as_matrix().transpose() * robot_rotation.as_matrix()
+                    rel_robot_rotation = Rotation.from_matrix(robot_rotm)
+                    padded_robot_state[t+1, 3:6] = rel_robot_rotation.as_rotvec()
+                    # position
+                    padded_robot_state[t+1, 0:3] = (reference_state_rotation.as_matrix().transpose()).dot(padded_robot_state[t+1, 0:3] - reference_state_pos)
+                    padded_robot_state[:-1, 0:6] = padded_robot_state[1:, 0:6] # pop relative current state which is always be identity
+                
+                padded_robot_state = padded_robot_state[:self.robot_obs_size] 
+
+            t6 = time()
             # new axis for different cameras
             all_cam_images = []
             for cam_name in self.camera_names:
                 all_cam_images.append(image_dict[cam_name])
+            
+            if self.use_depth:
+                for cam_name in self.camera_names:
+                    all_cam_images.append(depth_image_dict[cam_name])
+
             all_cam_images = np.stack(all_cam_images, axis=0)
 
-            # construct observations
-            image_data = torch.from_numpy(all_cam_images)
-            robot_state_data = torch.from_numpy(robot_state).float()
-            action_data = torch.from_numpy(padded_action).float()
+            # print('all_cam_images:', all_cam_images.shape)
+            # all_cam_images = all_cam_images[:, :start_ts+1]
+            # image_len = start_ts+1 
+
+            # original_image_stack_shape = all_cam_images.shape ## (camera num, epi len, h, w, c)
+
+            # padded_all_cam_images = np.zeros((original_image_stack_shape[0], self.max_episode_len, original_image_stack_shape[2], original_image_stack_shape[3], original_image_stack_shape[4]), dtype=np.int8)
+            # for cam_id in range(original_image_stack_shape[0]):
+            #     padded_all_cam_images[cam_id, :] = all_cam_images[cam_id, 0]
+            #     padded_all_cam_images[cam_id, :] = all_cam_images[cam_id, 0]
+
+            # padded_all_cam_images[:, -image_len:] = all_cam_images[:, :start_ts+1] 
+            # padded_all_cam_images = padded_all_cam_images[:, -self.img_obs_size:]
+            # padded_all_cam_images = padded_all_cam_images[:, ::-1]
+            t7 = time()
+
+            # construct torch data
+            action_data = torch.from_numpy(np.array(padded_action)).float()
+            robot_state_data = torch.from_numpy(np.array(padded_robot_state)).float()
+            image_data = torch.from_numpy(np.array(all_cam_images))
             is_pad = torch.from_numpy(is_pad).bool()
 
+            
             # channel last
-            image_data = torch.einsum('k h w c -> k c h w', image_data)
-
+            image_data = torch.einsum('k t h w c -> k t c h w', image_data)
+            t8 = time()
             # augmentation
-            if self.transformations is None:
+            if self.transformations:
                 print('Initializing transformations')
-                original_size = image_data.shape[2:]
+                original_size = image_data.shape[3:]
                 ratio = 0.95
                 self.transformations = [
                     transforms.RandomCrop(size=[int(original_size[0] * ratio), int(original_size[1] * ratio)]),
@@ -128,9 +234,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 ]
 
             if self.augment_images:
-                for transform in self.transformations:
-                    image_data = transform(image_data)
-
+                for k in range(image_data.shape[0]):
+                    for transform in self.transformations:
+                        image_data[k] = transform(image_data[k])
             # normalize image and change dtype to float
             image_data = image_data / 255.0
 
@@ -141,12 +247,28 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 # normalize to mean 0 std 1
                 action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats["action_std"]
 
+            # print('self.norm_stats["action_mean"]: ', self.norm_stats["action_mean"])
+            # print('self.norm_stats["action_std"]: ', self.norm_stats["action_std"])
+            # print('self.norm_stats["state_mean"]: ', self.norm_stats["state_mean"])
+            # print('self.norm_stats["state_std"]: ', self.norm_stats["state_std"])
+            # print('robot_state_data.shape: ', robot_state_data.shape)
+            # print('action_data.shape: ', action_data.shape)
+
             robot_state_data = (robot_state_data - self.norm_stats["state_mean"]) / self.norm_stats["state_std"]
 
         except:
             print(f'Error loading {dataset_path} in __getitem__')
             quit()
-
+        t9 = time()
+        # print("duration 1: ", t1-t0)
+        # print("duration 2: ", t2-t1)
+        # print("duration 3: ", t3-t2)
+        # print("duration 4: ", t4-t3)
+        # print("duration 5: ", t5-t4)
+        # print("duration 6: ", t6-t5)
+        # print("duration 7: ", t7-t6)
+        # print("duration 8: ", t8-t7)
+        # print("duration 9: ", t9-t8)
         # print(image_data.dtype, qpos_data.dtype, action_data.dtype, is_pad.dtype)
         return image_data, robot_state_data, action_data, is_pad
 
@@ -225,7 +347,7 @@ def BatchSampler(batch_size, episode_len_l, sample_weights):
             batch.append(step_idx)
         yield batch
 
-def load_data(dataset_dir_l, name_filter, camera_names, batch_size_train, batch_size_val, chunk_size, skip_mirrored_data=False, load_pretrain=False, policy_class=None, stats_dir_l=None, sample_weights=None, train_ratio=0.99):
+def load_data(dataset_dir_l, name_filter, camera_names, batch_size_train, batch_size_val, chunk_size, robot_obs_size, img_obs_size, img_obs_skip, skip_mirrored_data=False, load_pretrain=False, policy_class=None, stats_dir_l=None, sample_weights=None, train_ratio=0.9, use_depth = False):
     if type(dataset_dir_l) == str:
         dataset_dir_l = [dataset_dir_l]
     dataset_path_list_list = [find_all_hdf5(dataset_dir, skip_mirrored_data) for dataset_dir in dataset_dir_l]
@@ -268,10 +390,10 @@ def load_data(dataset_dir_l, name_filter, camera_names, batch_size_train, batch_
     # print(f'train_episode_len: {train_episode_len}, val_episode_len: {val_episode_len}, train_episode_ids: {train_episode_ids}, val_episode_ids: {val_episode_ids}')
 
     # construct dataset and dataloader
-    train_dataset = EpisodicDataset(dataset_path_list, camera_names, norm_stats, train_episode_ids, train_episode_len, chunk_size, policy_class)
-    val_dataset = EpisodicDataset(dataset_path_list, camera_names, norm_stats, val_episode_ids, val_episode_len, chunk_size, policy_class)
-    train_num_workers = (24 if os.getlogin() == 'robrosdg' else 16) if train_dataset.augment_images else 8
-    val_num_workers = 8 if train_dataset.augment_images else 4
+    train_dataset = EpisodicDataset(dataset_path_list, camera_names, norm_stats, train_episode_ids, train_episode_len, chunk_size, robot_obs_size, img_obs_size, img_obs_skip, policy_class, use_depth)
+    val_dataset = EpisodicDataset(dataset_path_list, camera_names, norm_stats, val_episode_ids, val_episode_len, chunk_size, robot_obs_size, img_obs_size, img_obs_skip, policy_class, use_depth)
+    train_num_workers = (16 if os.getlogin() == 'robrosdg' else 12)
+    val_num_workers = 4
     print(f'Augment images: {train_dataset.augment_images}, train_num_workers: {train_num_workers}, val_num_workers: {val_num_workers}')
     train_dataloader = DataLoader(train_dataset, batch_sampler=batch_sampler_train, pin_memory=True, num_workers=train_num_workers, prefetch_factor=2)
     val_dataloader = DataLoader(val_dataset, batch_sampler=batch_sampler_val, pin_memory=True, num_workers=val_num_workers, prefetch_factor=2)

@@ -34,7 +34,7 @@ def get_sinusoid_encoding_table(n_position, d_hid):
 
 class DETRVAE(nn.Module):
     """ This is the DETR module that performs object detection """
-    def __init__(self, backbones, transformer, encoder, state_dim, num_queries, camera_names, vq, vq_class, vq_dim, action_dim):
+    def __init__(self, backbones, transformer, encoder, args):
         """ Initializes the model.
         Parameters:
             backbones: torch module of the backbone to be used. See backbone.py
@@ -45,23 +45,26 @@ class DETRVAE(nn.Module):
             aux_loss: True if auxiliary decoding losses (loss at each decoder layer) are to be used.
         """
         super().__init__()
-        self.num_queries = num_queries
-        self.camera_names = camera_names
+        self.num_queries = args.num_queries
+        self.num_robot_observations = args.num_robot_observations
+        self.num_image_observations = args.num_image_observations
+        self.image_observation_skip = args.image_observation_skip
+        self.camera_names = args.camera_names
         self.transformer = transformer
         self.encoder = encoder
-        self.vq, self.vq_class, self.vq_dim = vq, vq_class, vq_dim
-        self.state_dim, self.action_dim = state_dim, action_dim
+        self.vq, self.vq_class, self.vq_dim = args.vq, args.vq_class, args.vq_dim
+        self.state_dim, self.action_dim = args.state_dim, args.action_dim
         hidden_dim = transformer.d_model
-        self.action_head = nn.Linear(hidden_dim, action_dim)
+        self.action_head = nn.Linear(hidden_dim, args.action_dim)
         self.is_pad_head = nn.Linear(hidden_dim, 1)
-        self.query_embed = nn.Embedding(num_queries, hidden_dim)
+        self.query_embed = nn.Embedding(self.num_queries, hidden_dim)
         if backbones is not None:
             self.input_proj = nn.Conv2d(backbones[0].num_channels, hidden_dim, kernel_size=1)
             self.backbones = nn.ModuleList(backbones)
-            self.input_proj_robot_state = nn.Linear(state_dim, hidden_dim)
+            self.input_proj_robot_state = nn.Linear(self.state_dim*self.num_robot_observations, hidden_dim)
         else:
             # input_dim = 14 + 7 # robot_state + env_state
-            self.input_proj_robot_state = nn.Linear(state_dim, hidden_dim)
+            self.input_proj_robot_state = nn.Linear(self.state_dim*self.num_robot_observations, hidden_dim)
             self.input_proj_env_state = nn.Linear(7, hidden_dim)
             self.pos = torch.nn.Embedding(2, hidden_dim)
             self.backbones = None
@@ -69,15 +72,15 @@ class DETRVAE(nn.Module):
         # encoder extra parameters
         self.latent_dim = 32 # final size of latent z # TODO tune
         self.cls_embed = nn.Embedding(1, hidden_dim) # extra cls token embedding
-        self.encoder_action_proj = nn.Linear(action_dim, hidden_dim) # project action to embedding
-        self.encoder_joint_proj = nn.Linear(state_dim, hidden_dim)  # project qpos to embedding
+        self.encoder_action_proj = nn.Linear(self.action_dim, hidden_dim) # project action to embedding
+        self.encoder_joint_proj = nn.Linear(self.state_dim, hidden_dim)  # project qpos to embedding
 
         print(f'Use VQ: {self.vq}, {self.vq_class}, {self.vq_dim}')
         if self.vq:
             self.latent_proj = nn.Linear(hidden_dim, self.vq_class * self.vq_dim)
         else:
             self.latent_proj = nn.Linear(hidden_dim, self.latent_dim*2) # project hidden state to latent std, var
-        self.register_buffer('pos_table', get_sinusoid_encoding_table(1+1+num_queries, hidden_dim)) # [CLS], qpos, a_seq
+        self.register_buffer('pos_table', get_sinusoid_encoding_table(1+self.num_robot_observations+self.num_queries, hidden_dim)) # [CLS], qpos, a_seq
 
         # decoder extra parameters
         if self.vq:
@@ -88,7 +91,7 @@ class DETRVAE(nn.Module):
 
 
     def encode(self, qpos, actions=None, is_pad=None, vq_sample=None):
-        bs, _ = qpos.shape
+        bs = qpos.shape[0]
         if self.encoder is None:
             latent_sample = torch.zeros([bs, self.latent_dim], dtype=torch.float32).to(qpos.device)
             latent_input = self.latent_out_proj(latent_sample)
@@ -100,18 +103,18 @@ class DETRVAE(nn.Module):
             if is_training:
                 # project action sequence to embedding dim, and concat with a CLS token
                 action_embed = self.encoder_action_proj(actions) # (bs, seq, hidden_dim)
-                qpos_embed = self.encoder_joint_proj(qpos)  # (bs, hidden_dim)
-                qpos_embed = torch.unsqueeze(qpos_embed, axis=1)  # (bs, 1, hidden_dim)
+                qpos_embed = self.encoder_joint_proj(qpos)  # (bs, num_obs, hidden_dim)
+                # qpos_embed = torch.unsqueeze(qpos_embed, axis=1)  # (bs, 1, hidden_dim)
                 cls_embed = self.cls_embed.weight # (1, hidden_dim)
                 cls_embed = torch.unsqueeze(cls_embed, axis=0).repeat(bs, 1, 1) # (bs, 1, hidden_dim)
-                encoder_input = torch.cat([cls_embed, qpos_embed, action_embed], axis=1) # (bs, seq+1, hidden_dim)
-                encoder_input = encoder_input.permute(1, 0, 2) # (seq+1, bs, hidden_dim)
+                encoder_input = torch.cat([cls_embed, qpos_embed, action_embed], axis=1) # (bs, seq+num_obs, hidden_dim)
+                encoder_input = encoder_input.permute(1, 0, 2) # (seq+num_obs, bs, hidden_dim)
                 # do not mask cls token
-                cls_joint_is_pad = torch.full((bs, 2), False).to(qpos.device) # False: not a padding
-                is_pad = torch.cat([cls_joint_is_pad, is_pad], axis=1)  # (bs, seq+1)
+                cls_joint_is_pad = torch.full((bs, 1+self.num_robot_observations), False).to(qpos.device) # False: not a padding
+                is_pad = torch.cat([cls_joint_is_pad, is_pad], axis=1)  # (bs, seq+num_obs)
                 # obtain position embedding
                 pos_embed = self.pos_table.clone().detach()
-                pos_embed = pos_embed.permute(1, 0, 2)  # (seq+1, 1, hidden_dim)
+                pos_embed = pos_embed.permute(1, 0, 2)  # (seq+num_obs, 1, hidden_dim)
                 # query model
                 encoder_output = self.encoder(encoder_input, pos=pos_embed, src_key_padding_mask=is_pad)
                 encoder_output = encoder_output[0] # take cls output only
@@ -145,26 +148,28 @@ class DETRVAE(nn.Module):
 
     def forward(self, qpos, image, env_state, actions=None, is_pad=None, vq_sample=None):
         """
-        qpos: batch, qpos_dim
-        image: batch, num_cam, channel, height, width
+        qpos: batch, num_obs, robot_state_dim
+        image: batch, num_cam, num_obs, channel, height, width
         env_state: None
         actions: batch, seq, action_dim
         """
         latent_input, probs, binaries, mu, logvar = self.encode(qpos, actions, is_pad, vq_sample)
-
+        bs = qpos.shape[0]
         # cvae decoder
         if self.backbones is not None:
             # Image observation features and position embeddings
             all_cam_features = []
             all_cam_pos = []
             for cam_id, cam_name in enumerate(self.camera_names):
-                features, pos = self.backbones[cam_id](image[:, cam_id])
-                features = features[0] # take the last layer feature
-                pos = pos[0]
-                all_cam_features.append(self.input_proj(features))
-                all_cam_pos.append(pos)
+                for t in range(self.num_image_observations):
+                    features, pos = self.backbones[cam_id](image[:, cam_id, t])
+                    features = features[0] # take the last layer feature
+                    pos = pos[0]
+                    all_cam_features.append(self.input_proj(features))
+                    all_cam_pos.append(pos)
             # proprioception features
-            proprio_input = self.input_proj_robot_state(qpos)
+            
+            proprio_input = self.input_proj_robot_state(qpos.reshape(bs, -1))
             # fold camera dimension into width dimension
             src = torch.cat(all_cam_features, axis=3)
             pos = torch.cat(all_cam_pos, axis=3)
@@ -288,13 +293,7 @@ def build(args):
         backbones,
         transformer,
         encoder,
-        state_dim=state_dim,
-        num_queries=args.num_queries,
-        camera_names=args.camera_names,
-        vq=args.vq,
-        vq_class=args.vq_class,
-        vq_dim=args.vq_dim,
-        action_dim=args.action_dim,
+        args,
     )
 
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -303,7 +302,7 @@ def build(args):
     return model
 
 def build_cnnmlp(args):
-    state_dim = 14 # TODO hardcode
+    state_dim = 7 # TODO hardcode
 
     # From state
     # backbone = None # from state for now, no need for conv nets

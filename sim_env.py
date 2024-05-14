@@ -6,7 +6,7 @@ from dm_control import mujoco
 from dm_control.rl import control
 from dm_control.suite import base
 
-from constants import DT, XML_DIR
+from robot.constants import DT, XML_DIR
 # from constants import DT, XML_DIR, START_ARM_POSE
 # from constants import PUPPET_GRIPPER_POSITION_UNNORMALIZE_FN
 # from constants import MASTER_GRIPPER_POSITION_NORMALIZE_FN

@@ -64,11 +64,12 @@ def main(args):
     camera_names = task_config['camera_names']
     stats_dir = task_config.get('stats_dir', None)
     sample_weights = task_config.get('sample_weights', None)
-    train_ratio = task_config.get('train_ratio', 0.99)
+    train_ratio = task_config.get('train_ratio', 0.9)
     name_filter = task_config.get('name_filter', lambda n: True)
 
     # fixed parameters
-    state_dim = 14
+    state_dim = 7
+    action_dim = 7
     lr_backbone = 1e-5
     backbone = 'resnet18'
     if policy_class == 'ACT':
@@ -77,6 +78,9 @@ def main(args):
         nheads = 8
         policy_config = {'lr': args['lr'],
                          'num_queries': args['chunk_size'],
+                         'num_robot_observations': args['robot_obs_size'],
+                         'num_image_observations': args['img_obs_size'],
+                         'image_observation_skip': args['img_obs_every'],
                          'kl_weight': args['kl_weight'],
                          'hidden_dim': args['hidden_dim'],
                          'dim_feedforward': args['dim_feedforward'],
@@ -89,18 +93,21 @@ def main(args):
                          'vq': args['use_vq'],
                          'vq_class': args['vq_class'],
                          'vq_dim': args['vq_dim'],
-                         'action_dim': 7,
+                         'action_dim': action_dim,
+                         'state_dim': state_dim,
                          'no_encoder': args['no_encoder'],
                          }
     elif policy_class == 'Diffusion':
 
         policy_config = {'lr': args['lr'],
                          'camera_names': camera_names,
-                         'action_dim': 7,
+                         'action_dim': action_dim,
+                         'state_dim': state_dim,
                          'observation_horizon': 1,
                          'action_horizon': 8,
                          'prediction_horizon': args['chunk_size'],
                          'num_queries': args['chunk_size'],
+                         'num_robot_observations': args['obs_size'],
                          'num_inference_timesteps': 10,
                          'ema_power': 0.75,
                          'vq': False,
@@ -163,7 +170,7 @@ def main(args):
         print()
         exit()
 
-    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, name_filter, camera_names, batch_size_train, batch_size_val, args['chunk_size'], args['skip_mirrored_data'], config['load_pretrain'], policy_class, stats_dir_l=stats_dir, sample_weights=sample_weights, train_ratio=train_ratio)
+    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, name_filter, camera_names, batch_size_train, batch_size_val, args['chunk_size'], args['robot_obs_size'], args['img_obs_size'], args['img_obs_every'], args['skip_mirrored_data'], config['load_pretrain'], policy_class, stats_dir_l=stats_dir, sample_weights=sample_weights, train_ratio=train_ratio, use_depth=config['use_depth'])
 
     # save dataset stats
     stats_path = os.path.join(ckpt_dir, f'dataset_stats.pkl')
@@ -571,8 +578,11 @@ def train_bc(train_dataloader, val_dataloader, config):
                 policy.eval()
                 validation_dicts = []
                 for batch_idx, data in enumerate(val_dataloader):
+                    # t0 = time.time()
                     forward_dict = forward_pass(data, policy)
                     validation_dicts.append(forward_dict)
+                    # t1 = time.time()
+                    # print(t1-t0)
                     if batch_idx > 50:
                         break
 
@@ -642,7 +652,7 @@ if __name__ == '__main__':
     parser.add_argument('--eval', action='store_true')
     parser.add_argument('--onscreen_render', action='store_true')
     parser.add_argument('--wandb', action='store_true')
-    parser.add_argument('--ckpt_dir', action='store', type=str, default='/home/robrosdg/dg/robros_imitation_learning/ckpt/default', help='ckpt_dir', required=True)
+    parser.add_argument('--ckpt_dir', action='store', type=str, default='/home/robrosdg/dg/robros_imitation_learning/ckpt/dsr_block_collect', help='ckpt_dir', required=True)
     parser.add_argument('--policy_class', action='store', type=str, default='ACT', help='policy_class, capitalize', required=True)
     parser.add_argument('--task_name', action='store', type=str, default='dsr_block_collect', help='task_name', required=True)
     parser.add_argument('--batch_size', action='store', type=int, default=8, help='batch_size', required=True)
@@ -663,9 +673,14 @@ if __name__ == '__main__':
 
     # for ACT
     parser.add_argument('--kl_weight', action='store', type=int, default=10, help='KL Weight', required=False)
-    parser.add_argument('--chunk_size', action='store', type=int, default=60, help='chunk_size', required=False)
+    parser.add_argument('--chunk_size', action='store', type=int, default=180, help='chunk_size', required=False)
+    parser.add_argument('--robot_obs_size', action='store', type=int, default=2, help='robot state observation_size', required=False)
+    parser.add_argument('--img_obs_size', action='store', type=int, default=2, help='image observation_size', required=False)
+    parser.add_argument('--img_obs_every', action='store', type=int, default=2, help='image observation every n steps', required=False)
+    parser.add_argument('--use_depth', action='store_true', default=False)
+
     parser.add_argument('--hidden_dim', action='store', type=int, default=512, help='hidden_dim', required=False)
-    parser.add_argument('--dim_feedforward', action='store', type=int, default=3200, help='dim_feedforward', required=False)
+    parser.add_argument('--dim_feedforward', action='store', type=int, default=2048, help='dim_feedforward', required=False)
     parser.add_argument('--temporal_agg', action='store_true')
     parser.add_argument('--use_vq', action='store_true')
     parser.add_argument('--vq_class', action='store', type=int, help='vq_class')
