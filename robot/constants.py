@@ -9,6 +9,11 @@ TASK_CONFIGS = {
         'episode_len': 4000,
         'camera_names': ['lhand_camera', 'head_camera']
     },
+    'dsr_block_sort':{
+        'dataset_dir': DATA_DIR + '/dsr_block_sort/240516',
+        'episode_len': 2000,
+        'camera_names': ['lhand_camera']
+    },
 }
 
 HZ = 30
