@@ -75,7 +75,7 @@ def main(args):
     backbone = 'resnet18'
     if policy_class == 'ACT':
         enc_layers = 4
-        dec_layers = 6
+        dec_layers = 7
         nheads = 8
         policy_config = {'lr': args['lr'],
                          'num_queries': args['chunk_size'],
@@ -97,6 +97,7 @@ def main(args):
                          'action_dim': action_dim,
                          'state_dim': state_dim,
                          'no_encoder': args['no_encoder'],
+                         'use_depth': use_depth,
                          }
     elif policy_class == 'Diffusion':
 
@@ -147,7 +148,6 @@ def main(args):
         'load_pretrain': args['load_pretrain'],
         'actuator_config': actuator_config,
         'wandb': is_wandb,
-        'use_depth': use_depth
     }
 
     if not os.path.isdir(ckpt_dir):
@@ -681,8 +681,8 @@ if __name__ == '__main__':
     parser.add_argument('--img_obs_every', action='store', type=int, default=1, help='image observation every n steps', required=False)
     parser.add_argument('--use_depth', action='store_true', default=False)
 
-    parser.add_argument('--hidden_dim', action='store', type=int, default=256, help='hidden_dim', required=False)
-    parser.add_argument('--dim_feedforward', action='store', type=int, default=1024, help='dim_feedforward', required=False)
+    parser.add_argument('--hidden_dim', action='store', type=int, default=512, help='hidden_dim', required=False)
+    parser.add_argument('--dim_feedforward', action='store', type=int, default=2048, help='dim_feedforward', required=False)
     parser.add_argument('--temporal_agg', action='store_true')
     parser.add_argument('--use_vq', action='store_true')
     parser.add_argument('--vq_class', action='store', type=int, help='vq_class')

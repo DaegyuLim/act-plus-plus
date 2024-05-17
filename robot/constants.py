@@ -5,9 +5,14 @@ import os
 DATA_DIR = os.path.expanduser('~/dg/IL_data')
 TASK_CONFIGS = {
     'dsr_block_collect':{
-        'dataset_dir': DATA_DIR + '/dsr_block_collect/240513',
+        'dataset_dir': DATA_DIR + '/dsr_block_collect',
         'episode_len': 4000,
         'camera_names': ['lhand_camera', 'head_camera']
+    },
+    'dsr_block_sort':{
+        'dataset_dir': DATA_DIR + '/dsr_block_sort',
+        'episode_len': 2000,
+        'camera_names': ['lhand_camera']
     },
 }
 

@@ -39,8 +39,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
         self.use_depth = use_depth
     
-        self.reletive_action_mode = True
-        self.reletive_obs_mode = True
+        self.reletive_action_mode = False
+        self.reletive_obs_mode = False
         self.__getitem__(0) # initialize self.is_sim and self.transformations
         self.is_sim = False
         
@@ -150,6 +150,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
             padded_robot_state = padded_robot_state[::-1] # padded_robot_state[0] is the current observation at start_ts
             
             t5 = time()
+            # print('padded_robot_state: ', padded_robot_state[0, 0:6])
+            # print('padded_action pre: ', padded_action[:10, 0:6])
+
             if self.reletive_action_mode:
                 reference_state_pos = padded_robot_state[0, 0:3]
                 reference_state_euler = padded_robot_state[0, 3:6]
@@ -163,7 +166,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     padded_action[t, 3:6] = rel_action_rotation.as_rotvec()
                     # position
                     padded_action[t, 0:3] = (reference_state_rotation.as_matrix().transpose()).dot(padded_action[t, 0:3] - reference_state_pos)
-                    # print('padded_action[t, 0:3]: ', padded_action[t, 0:3])
+                    # print('padded_action: ', t, ', ', padded_action[t, 0:3], ', ', padded_action[t, 3:6])
                     # print( (reference_state_rotation.as_matrix()))
                     # print( (reference_state_rotation.as_matrix().transpose()))
 
