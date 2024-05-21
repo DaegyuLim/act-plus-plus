@@ -229,7 +229,7 @@ class gripperControl:
 
     def control_loop(self):
         rate = rospy.Rate(self.hz)
-    
+        
         while not rospy.is_shutdown():
             if self.stop_control_loop:
                 return
