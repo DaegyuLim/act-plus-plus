@@ -44,8 +44,9 @@ class gripperControl:
 
         self.gripper_desired_position_buffer = np.zeros(8)
 
-        self.gripper_state = 0
-        self.gripper_command = 0
+        self.gripper_state = 0.0
+        self.gripper_command = 0.0
+        self.policy_gripper_command = 0.0
 
         self.ser = serial.Serial()
         
@@ -225,11 +226,13 @@ class gripperControl:
     def step(self):
         if self.teleop:
             self.readTriggerInputs()
+        else:
+            self.readPolicyCommand()
         self.control()
 
     def control_loop(self):
         rate = rospy.Rate(self.hz)
-    
+        print("GRIPPER CONTROL START")
         while not rospy.is_shutdown():
             if self.stop_control_loop:
                 return
@@ -237,25 +240,28 @@ class gripperControl:
             rate.sleep()
 
     def open(self):
-        self.gripper_command = 0
+        self.gripper_command = 0.0
 
     def close(self):
-        self.gripper_command = 1
+        self.gripper_command = 1.0
 
     def get_state(self):
         return np.array([self.gripper_state])
     
     def get_action(self):
-        return np.array([self.gripper_command])
+        return np.array([self.policy_gripper_command])
     
     def set_action(self, gripper_action):
-        self.gripper_command = gripper_action
+        self.policy_gripper_command = gripper_action
 
     def readTriggerInputs(self):
         self.controller_inputs = self.controller_inputs_raw
         self.gripper_desired_position_buffer[1:] = self.gripper_desired_position_buffer[0:-1]
         self.gripper_desired_position_buffer[0] = self.controller_inputs.press_index
         self.gripper_command = np.mean(self.gripper_desired_position_buffer)
+
+    def readPolicyCommand(self):
+        self.gripper_command = self.policy_gripper_command
 
     def send_gripper_pos(self, des_pos = 1):
         desired_gripper_pos_um = int( np.clip(83000 *(1-des_pos), 0, 83000) )

@@ -60,7 +60,7 @@ class drlControl:
         ### initialize variables ###
         # self.r = CDsrRobot(ROBOT_ID, ROBOT_MODEL)
 
-        self.msgRobotState_cb_count = 0
+        # self.msgRobotState_cb_count = 0
         self.right_hand_pose_raw = PoseStamped()
         self.right_hand_pose_raw.pose.orientation.w = 1
         self.right_hand_twist_raw = Twist()
@@ -167,44 +167,44 @@ class drlControl:
         self.drl_tcp_client.shutdown()
         return 0
 
-    def msgRobotState_cb(self, msg):
-        self.msgRobotState_cb_count += 1
+    # def msgRobotState_cb(self, msg):
+    #     self.msgRobotState_cb_count += 1
 
-        if (0==(self.msgRobotState_cb_count % 100)): 
-            rospy.loginfo("________ ROBOT STATUS ________")
-            print("  robot_state       : %d" % (msg.robot_state))
-            print("  robot_state_str   : %s" % (msg.robot_state_str))
-            print("  current_posj      : %7.3f %7.3f %7.3f %7.3f %7.3f %7.3f" % (msg.current_posj[0],msg.current_posj[1],msg.current_posj[2],msg.current_posj[3],msg.current_posj[4],msg.current_posj[5]))
-            print("  current_posx      : %7.3f %7.3f %7.3f %7.3f %7.3f %7.3f" % (msg.current_posx[0],msg.current_posx[1],msg.current_posx[2],msg.current_posx[3],msg.current_posx[4],msg.current_posx[5]))
+    #     if (0==(self.msgRobotState_cb_count % 100)): 
+    #         rospy.loginfo("________ ROBOT STATUS ________")
+    #         print("  robot_state       : %d" % (msg.robot_state))
+    #         print("  robot_state_str   : %s" % (msg.robot_state_str))
+    #         print("  current_posj      : %7.3f %7.3f %7.3f %7.3f %7.3f %7.3f" % (msg.current_posj[0],msg.current_posj[1],msg.current_posj[2],msg.current_posj[3],msg.current_posj[4],msg.current_posj[5]))
+    #         print("  current_posx      : %7.3f %7.3f %7.3f %7.3f %7.3f %7.3f" % (msg.current_posx[0],msg.current_posx[1],msg.current_posx[2],msg.current_posx[3],msg.current_posx[4],msg.current_posx[5]))
 
-            #print("  io_control_box    : %d" % (msg.io_control_box))
-            ##print("  io_modbus         : %d" % (msg.io_modbus))
-            ##print("  error             : %d" % (msg.error))
-            #print("  access_control    : %d" % (msg.access_control))
-            #print("  homming_completed : %d" % (msg.homming_completed))
-            #print("  tp_initialized    : %d" % (msg.tp_initialized))
-            #print("  speed             : %d" % (msg.speed))
-            #print("  mastering_need    : %d" % (msg.mastering_need))
-            #print("  drl_stopped       : %d" % (msg.drl_stopped))
-            #print("  disconnected      : %d" % (msg.disconnected))
+    #         #print("  io_control_box    : %d" % (msg.io_control_box))
+    #         ##print("  io_modbus         : %d" % (msg.io_modbus))
+    #         ##print("  error             : %d" % (msg.error))
+    #         #print("  access_control    : %d" % (msg.access_control))
+    #         #print("  homming_completed : %d" % (msg.homming_completed))
+    #         #print("  tp_initialized    : %d" % (msg.tp_initialized))
+    #         #print("  speed             : %d" % (msg.speed))
+    #         #print("  mastering_need    : %d" % (msg.mastering_need))
+    #         #print("  drl_stopped       : %d" % (msg.drl_stopped))
+    #         #print("  disconnected      : %d" % (msg.disconnected))
 
-        self.current_dsr_pos_raw[0] = msg.current_posx[0]
-        self.current_dsr_pos_raw[1] = msg.current_posx[1]
-        self.current_dsr_pos_raw[2] = msg.current_posx[2]
+    #     self.current_dsr_pos_raw[0] = msg.current_posx[0]
+    #     self.current_dsr_pos_raw[1] = msg.current_posx[1]
+    #     self.current_dsr_pos_raw[2] = msg.current_posx[2]
         
-        self.current_dsr_euler_raw[0] = msg.current_posx[3]
-        self.current_dsr_euler_raw[1] = msg.current_posx[4]
-        self.current_dsr_euler_raw[2] = msg.current_posx[5]
+    #     self.current_dsr_euler_raw[0] = msg.current_posx[3]
+    #     self.current_dsr_euler_raw[1] = msg.current_posx[4]
+    #     self.current_dsr_euler_raw[2] = msg.current_posx[5]
 
-        r_current_ori = Rotation.from_euler("ZYZ", msg.current_posx[3:6], degrees=True)
-        self.current_dsr_rotm_raw = r_current_ori.as_matrix()
-        self.current_dsr_rotvec_raw = r_current_ori.as_rotvec()
+    #     r_current_ori = Rotation.from_euler("ZYZ", msg.current_posx[3:6], degrees=True)
+    #     self.current_dsr_rotm_raw = r_current_ori.as_matrix()
+    #     self.current_dsr_rotvec_raw = r_current_ori.as_rotvec()
     
 
-    def thread_subscriber(self):
-        rospy.Subscriber('/'+ROBOT_ID +ROBOT_MODEL+'/state', RobotState, self.msgRobotState_cb)
-        rospy.spin()
-        #rospy.spinner(2)    
+    # def thread_subscriber(self):
+    #     rospy.Subscriber('/'+ROBOT_ID +ROBOT_MODEL+'/state', RobotState, self.msgRobotState_cb)
+    #     rospy.spin()
+    #     #rospy.spinner(2)    
 
 
     def ovr2ros_right_hand_pose_callback(self, data): 
@@ -593,6 +593,7 @@ if __name__ == "__main__":
     rate = rospy.Rate(drlcontrol.hz)
     # rate = rospy.Rate(20)
     
+    print("DSR CONTROL START")
     while not rospy.is_shutdown():
         drlcontrol.step()
         rate.sleep()
