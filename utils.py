@@ -75,6 +75,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     action = np.concatenate([ root['/actions/pose'][()], root['/actions/gripper_pos'][()] ], axis=-1)
                     # dummy_base_action = np.zeros([action.shape[0], 2])
                     # action = np.concatenate([action, dummy_base_action], axis=-1)
+                
                 original_action_shape = action.shape
                 episode_len = original_action_shape[0]
                 # get observation at start_ts only
@@ -392,7 +393,7 @@ def load_data(dataset_dir_l, name_filter, camera_names, batch_size_train, batch_
     # construct dataset and dataloader
     train_dataset = EpisodicDataset(dataset_path_list, camera_names, norm_stats, train_episode_ids, train_episode_len, chunk_size, robot_obs_size, img_obs_size, img_obs_skip, policy_class, use_depth)
     val_dataset = EpisodicDataset(dataset_path_list, camera_names, norm_stats, val_episode_ids, val_episode_len, chunk_size, robot_obs_size, img_obs_size, img_obs_skip, policy_class, use_depth)
-    train_num_workers = (16 if os.getlogin() == 'robrosdg' else 12)
+    train_num_workers = (16 if os.getlogin() == 'robrosdg' else 8)
     val_num_workers = 4
     print(f'Augment images: {train_dataset.augment_images}, train_num_workers: {train_num_workers}, val_num_workers: {val_num_workers}')
     train_dataloader = DataLoader(train_dataset, batch_sampler=batch_sampler_train, pin_memory=True, num_workers=train_num_workers, prefetch_factor=2)
