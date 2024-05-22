@@ -100,6 +100,8 @@ def main(args):
     for cnt in range(3):
         print(3 - cnt, 'seconds before to start!!!')
         time.sleep(1.0)
+        if rospy.is_shutdown():
+                break
 
     #ready gripper thread
     gripper_thread = threading.Thread(target=gripper.control_loop)
@@ -119,7 +121,7 @@ def main(args):
         dsr_state_euler = dsr.get_euler()
         gripper_action = gripper.get_action()
         gripper_state = gripper.get_state()
-        
+
         data_dict['/observations/xpos'].append(dsr_state_xpos)
         data_dict['/observations/euler'].append(dsr_state_euler)
         data_dict['/observations/gripper_pos'].append(gripper_state)

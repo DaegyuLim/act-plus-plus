@@ -654,7 +654,7 @@ if __name__ == '__main__':
     parser.add_argument('--eval', action='store_true')
     parser.add_argument('--onscreen_render', action='store_true')
     parser.add_argument('--wandb', action='store_true')
-    parser.add_argument('--ckpt_dir', action='store', type=str, default='/home/robrosdg/dg/robros_imitation_learning/ckpt/dsr_block_collect', help='ckpt_dir', required=True)
+    parser.add_argument('--ckpt_dir', action='store', type=str, default='/home/robros-ai/dg/robros_imitation_learning/ckpt/dsr_block_sort', help='ckpt_dir', required=True)
     parser.add_argument('--policy_class', action='store', type=str, default='ACT', help='policy_class, capitalize', required=True)
     parser.add_argument('--task_name', action='store', type=str, default='dsr_block_collect', help='task_name', required=True)
     parser.add_argument('--batch_size', action='store', type=int, default=16, help='batch_size', required=True)
@@ -675,7 +675,7 @@ if __name__ == '__main__':
 
     # for ACT
     parser.add_argument('--kl_weight', action='store', type=int, default=10, help='KL Weight', required=False)
-    parser.add_argument('--chunk_size', action='store', type=int, default=90, help='chunk_size', required=False)
+    parser.add_argument('--chunk_size', action='store', type=int, default=60, help='chunk_size', required=False)
     parser.add_argument('--robot_obs_size', action='store', type=int, default=60, help='robot state observation_size', required=False)
     parser.add_argument('--img_obs_size', action='store', type=int, default=1, help='image observation_size', required=False)
     parser.add_argument('--img_obs_every', action='store', type=int, default=1, help='image observation every n steps', required=False)
