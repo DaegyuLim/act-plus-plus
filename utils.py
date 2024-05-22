@@ -76,6 +76,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     # dummy_base_action = np.zeros([action.shape[0], 2])
                     # action = np.concatenate([action, dummy_base_action], axis=-1)
                 
+                print(action[0, :])
+                
                 original_action_shape = action.shape
                 episode_len = original_action_shape[0]
                 # get observation at start_ts only
