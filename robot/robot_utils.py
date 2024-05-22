@@ -28,8 +28,8 @@ class ImageRecorder:
                 depth_callback_func = self.depth_cb_head_cam
             else:
                 raise NotImplementedError
-            rospy.Subscriber(f"/{cam_name}/color/image_raw", Image, image_callback_func)
-            rospy.Subscriber(f"/{cam_name}/aligned_depth_to_color/image_raw", Image, depth_callback_func)
+            rospy.Subscriber(f"/{cam_name}/image_raw", Image, image_callback_func)
+            # rospy.Subscriber(f"/{cam_name}/aligned_depth_to_color/image_raw", Image, depth_callback_func)
             if self.is_debug:
                 setattr(self, f'{cam_name}_timestamps', deque(maxlen=50))
         time.sleep(0.5)

@@ -36,7 +36,7 @@ def get_args_parser():
                         help="Number of encoding layers in the transformer")
     parser.add_argument('--dec_layers', default=6, type=int, # will be overridden
                         help="Number of decoding layers in the transformer")
-    parser.add_argument('--dim_feedforward', default=2048, type=int, # will be overridden
+    parser.add_argument('--dim_feedforward', default=1024, type=int, # will be overridden
                         help="Intermediate size of the feedforward layers in the transformer blocks")
     parser.add_argument('--hidden_dim', default=256, type=int, # will be overridden
                         help="Size of the embeddings (dimension of the transformer)")
@@ -67,7 +67,7 @@ def get_args_parser():
     parser.add_argument('--robot_obs_size', action='store', type=int, default=2, help='robot state observation_size', required=False)
     parser.add_argument('--img_obs_size', action='store', type=int, default=2, help='image observation_size', required=False)
     parser.add_argument('--img_obs_every', action='store', type=int, default=2, help='image observation every n steps', required=False)
-    parser.add_argument('--use_depth', action='store_true')
+    parser.add_argument('--use_depth', action='store_true', default=False)
 
     parser.add_argument('--temporal_agg', action='store_true')
     parser.add_argument('--use_vq', action='store_true')

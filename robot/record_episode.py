@@ -8,11 +8,11 @@ import rospy
 import os
 import time
 import threading
-from std_msgs.msg import Float32MultiArray, Float32
-from quest2ros.msg import OVR2ROSInputs, OVR2ROSHapticFeedback
-from geometry_msgs.msg import PoseStamped, Twist 
+# from std_msgs.msg import Float32MultiArray, Float32
+# from quest2ros.msg import OVR2ROSInputs, OVR2ROSHapticFeedback
+# from geometry_msgs.msg import PoseStamped, Twist 
 import numpy as np
-from scipy.spatial.transform import Rotation
+# from scipy.spatial.transform import Rotation
 import h5py
 import argparse
 from constants import *
@@ -70,29 +70,29 @@ def main(args):
     }
     for cam_name in camera_names:
         data_dict[f'/observations/images/{cam_name}'] = []
-        data_dict[f'/observations/depth_images/{cam_name}'] = []
+        # data_dict[f'/observations/depth_images/{cam_name}'] = []
 
 
     images = dict()
-    depth_images = dict()
+    # depth_images = dict()
     actual_dt_history = []
 
     # check cameara streaming
     for cam_name in camera_names:
         images = image_recorder.get_images()
-        depth_images = image_recorder.get_depth_images()
+        # depth_images = image_recorder.get_depth_images()
         while images[cam_name] is None:
             print('waiting '+cam_name+' image streaming...')
             if rospy.is_shutdown():
                 break
             time.sleep(1.0)
             images = image_recorder.get_images()
-        while depth_images[cam_name] is None:
-            print('waiting '+cam_name+' depth image streaming...')
-            if rospy.is_shutdown():
-                break
-            time.sleep(1.0)
-            images = image_recorder.get_images()
+        # while depth_images[cam_name] is None:
+        #     print('waiting '+cam_name+' depth image streaming...')
+        #     if rospy.is_shutdown():
+        #         break
+        #     time.sleep(1.0)
+        #     images = image_recorder.get_images()
 
     
 
@@ -128,7 +128,7 @@ def main(args):
 
         for cam_name in camera_names:
             data_dict[f'/observations/images/{cam_name}'].append((image_recorder.get_images())[cam_name])
-            data_dict[f'/observations/depth_images/{cam_name}'].append((image_recorder.get_depth_images())[cam_name])
+            # data_dict[f'/observations/depth_images/{cam_name}'].append((image_recorder.get_depth_images())[cam_name])
         t2 = time.time() #
         actual_dt_history.append([t0, t1, t2])
 
@@ -162,35 +162,33 @@ def main(args):
         t0 = time.time()
         encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50] # tried as low as 20, seems fine
         compressed_image_len = []
-        compressed_depth_len = []
+        # compressed_depth_len = []
         for cam_name in camera_names:
             image_list = data_dict[f'/observations/images/{cam_name}']
-            depth_list = data_dict[f'/observations/depth_images/{cam_name}']
             compressed_list = []
-            compressed_depth_list = []
             compressed_image_len.append([])
-            compressed_depth_len.append([])
+            # depth_list = data_dict[f'/observations/depth_images/{cam_name}']
+            # compressed_depth_list = []
+            # compressed_depth_len.append([])
             for image in image_list:
                 result, encoded_image = cv2.imencode('.jpg', image, encode_param) # 0.02 sec # cv2.imdecode(encoded_image, 1)
                 compressed_list.append(encoded_image)
                 compressed_image_len[-1].append(len(encoded_image))
                 if result == False:
                     print('Error during image compression')
-            for depth in depth_list:
-                result, encoded_depth = cv2.imencode('.jpg', depth, encode_param) # 0.02 sec # cv2.imdecode(encoded_image, 1)
-                compressed_depth_list.append(encoded_depth)
-                compressed_depth_len[-1].append(len(encoded_depth))
-                if result == False:
-                    print('Error during depth image compression')
+            # for depth in depth_list:
+            #     result, encoded_depth = cv2.imencode('.jpg', depth, encode_param) # 0.02 sec # cv2.imdecode(encoded_image, 1)
+            #     compressed_depth_list.append(encoded_depth)
+            #     compressed_depth_len[-1].append(len(encoded_depth))
+            #     if result == False:
+            #         print('Error during depth image compression')
             data_dict[f'/observations/images/{cam_name}'] = compressed_list
-            data_dict[f'/observations/depth_images/{cam_name}'] = compressed_depth_list
+            # data_dict[f'/observations/depth_images/{cam_name}'] = compressed_depth_list
         print(f'compression: {time.time() - t0:.2f}s')
 
         # pad so it has same length
         t0 = time.time()
         compressed_image_len = np.array(compressed_image_len)
-        compressed_depth_len = np.array(compressed_depth_len)
-
         padded_size = compressed_image_len.max()
         for cam_name in camera_names:
             compressed_image_list = data_dict[f'/observations/images/{cam_name}']
@@ -202,16 +200,17 @@ def main(args):
                 padded_compressed_image_list.append(padded_compressed_image)
             data_dict[f'/observations/images/{cam_name}'] = padded_compressed_image_list
 
-        padded_size2 = compressed_depth_len.max()
-        for cam_name in camera_names:
-            compressed_depth_list = data_dict[f'/observations/depth_images/{cam_name}']
-            padded_compressed_depth_list = []
-            for compressed_depth in compressed_depth_list:
-                padded_compressed_depth = np.zeros(padded_size2, dtype='uint8')
-                depth_len = len(compressed_depth)
-                padded_compressed_depth[:depth_len] = compressed_depth
-                padded_compressed_depth_list.append(padded_compressed_depth)
-            data_dict[f'/observations/depth_images/{cam_name}'] = padded_compressed_depth_list
+        # compressed_depth_len = np.array(compressed_depth_len)
+        # padded_size2 = compressed_depth_len.max()
+        # for cam_name in camera_names:
+        #     compressed_depth_list = data_dict[f'/observations/depth_images/{cam_name}']
+        #     padded_compressed_depth_list = []
+        #     for compressed_depth in compressed_depth_list:
+        #         padded_compressed_depth = np.zeros(padded_size2, dtype='uint8')
+        #         depth_len = len(compressed_depth)
+        #         padded_compressed_depth[:depth_len] = compressed_depth
+        #         padded_compressed_depth_list.append(padded_compressed_depth)
+        #     data_dict[f'/observations/depth_images/{cam_name}'] = padded_compressed_depth_list
         print(f'padding: {time.time() - t0:.2f}s')
 
     # HDF5
@@ -222,18 +221,18 @@ def main(args):
         obs = root.create_group('observations')
         actions = root.create_group('actions')
         image = obs.create_group('images')
-        depth = obs.create_group('depth_images')
+        # depth = obs.create_group('depth_images')
         for cam_name in camera_names:
             if COMPRESS:
                 _ = image.create_dataset(cam_name, (max_timesteps, padded_size), dtype='uint8',
                                          chunks=(1, padded_size), )
-                _ = depth.create_dataset(cam_name, (max_timesteps, padded_size2), dtype='uint8',
-                                         chunks=(1, padded_size2), )
+                # _ = depth.create_dataset(cam_name, (max_timesteps, padded_size2), dtype='uint8',
+                #                          chunks=(1, padded_size2), )
             else:
-                _ = image.create_dataset(cam_name, (max_timesteps, 480, 640, 3), dtype='uint8',
-                                         chunks=(1, 480, 640, 3), )
-                _ = depth.create_dataset(cam_name, (max_timesteps, 480, 640), dtype='uint8',
-                                        chunks=(1, 480, 640, 1), )
+                _ = image.create_dataset(cam_name, (max_timesteps, 360, 1280, 3), dtype='uint8',
+                                         chunks=(1, 360, 1280, 3), )
+                # _ = depth.create_dataset(cam_name, (max_timesteps, 360, 1280), dtype='uint8',
+                #                         chunks=(1, 360, 1280, 1), )
         _ = obs.create_dataset('xpos', (max_timesteps, 3))
         _ = obs.create_dataset('euler', (max_timesteps, 3))
         _ = obs.create_dataset('gripper_pos', (max_timesteps, 1))
@@ -245,9 +244,9 @@ def main(args):
 
         if COMPRESS:
             _ = root.create_dataset('compressed_image_len', (len(camera_names), max_timesteps))
-            _ = root.create_dataset('compressed_depth_len', (len(camera_names), max_timesteps))
             root['/compressed_image_len'][...] = compressed_image_len
-            root['/compressed_depth_len'][...] = compressed_depth_len
+            # _ = root.create_dataset('compressed_depth_len', (len(camera_names), max_timesteps))
+            # root['/compressed_depth_len'][...] = compressed_depth_len
 
     print(f'Saving: {time.time() - t0:.1f} secs')
 
@@ -263,7 +262,7 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task_name', action='store', type=str, help='Task name.', default='dsr_block_collect', required=False)
+    parser.add_argument('--task_name', action='store', type=str, help='Task name.', default='dsr_block_sort', required=False)
     parser.add_argument('--episode_idx', action='store', type=int, help='Episode index.', default=None, required=False)
     main(vars(parser.parse_args())) # TODO
     # debug()

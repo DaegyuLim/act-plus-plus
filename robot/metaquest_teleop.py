@@ -133,6 +133,7 @@ class drlControl:
         self.dsr_desired_x_pose_lpf = [0, 0, 0, 0, 0, 0]
 
         self.dsr_desired_rotm = np.eye(3)
+        self.quat_des = np.array([0,0,0,1])
         # self.dsr_desired_x_home_pose = [365,  0, 290, 0, -180, 0]
 
         self.dsr_desired_x_vel = [0, 0, 0, 0, 0, 0]
@@ -273,14 +274,15 @@ class drlControl:
             # print("left button B is released!")
 
     def readRobotData(self):
-        self.current_dsr_pos = self.current_dsr_pos_raw.copy()
-        self.current_dsr_rotm = self.current_dsr_rotm_raw.copy()
-        self.current_dsr_euler = self.current_dsr_euler_raw.copy()
-        self.current_dsr_rotvec = self.current_dsr_rotvec_raw.copy()
+        # self.current_dsr_pos = self.current_dsr_pos_raw.copy()
+        # self.current_dsr_rotm = self.current_dsr_rotm_raw.copy()
+        # self.current_dsr_euler = self.current_dsr_euler_raw.copy()
+        # self.current_dsr_rotvec = self.current_dsr_rotvec_raw.copy()
 
-        current_dsr_rotation = Rotation.from_matrix(self.current_dsr_rotm)
+        current_dsr_rotation = Rotation.from_euler("ZYZ", self.current_dsr_euler, degrees=True)
         current_dsr_quat = current_dsr_rotation.as_quat() # [x, y, z, w]
 
+        self.right_arm_pose_state_msg.header.stamp = rospy.Time.now()
         self.right_arm_pose_state_msg.pose.position.x = self.current_dsr_pos[0]
         self.right_arm_pose_state_msg.pose.position.y = self.current_dsr_pos[1]
         self.right_arm_pose_state_msg.pose.position.z = self.current_dsr_pos[2]
@@ -291,7 +293,7 @@ class drlControl:
 
 
     def calculateTragetPose(self):
-        self.control_mode = 0
+        # self.control_mode = 0
 
         if self.right_botton_lower_clicked:
             self.right_botton_lower_clicked = False
@@ -322,6 +324,12 @@ class drlControl:
 
         if self.right_botton_lower_released:
             self.right_botton_lower_released = False
+            # self.dsr_desired_x_pose_pre[0:3] = self.current_dsr_pos.copy()
+            # self.dsr_desired_x_pose_pre[3:6] = self.current_dsr_euler.copy()
+
+            # self.dsr_desired_x_pose_lpf[0:3] = self.current_dsr_pos.copy()
+            # self.dsr_desired_x_pose_lpf[3:6] = self.current_dsr_euler.copy()
+
 
         if self.right_hand_inputs.button_lower == True:
             self.control_mode = 1
@@ -340,14 +348,13 @@ class drlControl:
             #     for i in range(3):
             #         self.dsr_desired_x_pose[i] = self.dsr_desired_x_pose_pre[i] + (d_x_pose[i])/d_x_pose_norm*self.max_lin_vel
 
+            
             # k_v = 2.3
             for i in range(3):
                 self.dsr_desired_x_pose_lpf[i] = self.lpf(self.dsr_desired_x_pose[i], self.dsr_desired_x_pose_lpf[i], self.lpf_cutoff_hz)
                 # self.dsr_desired_x_vel[i] = np.clip(k_v*(self.dsr_desired_x_pose_lpf[i] - self.current_dsr_pos[i]), -300, 300) # dim: [mm/s]
 
-            self.right_arm_pose_action_msg.pose.position.x = self.dsr_desired_x_pose_lpf[0]
-            self.right_arm_pose_action_msg.pose.position.y = self.dsr_desired_x_pose_lpf[1]
-            self.right_arm_pose_action_msg.pose.position.z = self.dsr_desired_x_pose_lpf[2]
+
             #################################################################################
 
             ############################## agnular velocity ##################################
@@ -370,21 +377,18 @@ class drlControl:
             # for i in range(3):
             #     self.dsr_desired_x_vel[i+3] = np.clip(k_w*delta_rotation.as_rotvec(degrees = True)[i], -90.0, 90.0) # dim:[deg/s]
 
-            quat_des = r_des.as_quat()
-            self.right_arm_pose_action_msg.pose.orientation.x = quat_des[0]
-            self.right_arm_pose_action_msg.pose.orientation.y = quat_des[1]
-            self.right_arm_pose_action_msg.pose.orientation.z = quat_des[2]
-            self.right_arm_pose_action_msg.pose.orientation.w = quat_des[3]
-            #################################################################################
+            self.quat_des = r_des.as_quat()
 
+            #################################################################################
+            
 
         elif self.right_botton_upper_clicked:
             self.control_mode = 2
             print("move to READY-POSE")
             self.right_botton_upper_clicked = False
         elif self.left_botton_upper_clicked:
-            self.control_mode = 3
-            print("move to HOME-POSE")
+            self.control_mode = 0
+            print("STOP ROBOT!")
             self.left_botton_upper_clicked = False
 
 
@@ -403,7 +407,7 @@ class drlControl:
 
     def calculateTragetVelocity(self, target_pose):
         # position
-        k_v = 2.3
+        k_v = 2.3 # 2.3
         target_vel = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         for i in range(3):
             target_vel[i] = np.clip(k_v*(target_pose[i] - self.current_dsr_pos[i]), -300, 300) # dim: [mm/s]
@@ -419,6 +423,17 @@ class drlControl:
         return target_vel
 
     def rosMsgPublish(self):
+        
+
+        self.right_arm_pose_action_msg.pose.position.x = self.dsr_desired_x_pose_lpf[0]
+        self.right_arm_pose_action_msg.pose.position.y = self.dsr_desired_x_pose_lpf[1]
+        self.right_arm_pose_action_msg.pose.position.z = self.dsr_desired_x_pose_lpf[2]
+
+        self.right_arm_pose_action_msg.pose.orientation.x = self.quat_des[0]
+        self.right_arm_pose_action_msg.pose.orientation.y = self.quat_des[1]
+        self.right_arm_pose_action_msg.pose.orientation.z = self.quat_des[2]
+        self.right_arm_pose_action_msg.pose.orientation.w = self.quat_des[3]
+        self.right_arm_pose_action_msg.header.stamp = rospy.Time.now()
 
         self.pose_state_pub.publish(self.right_arm_pose_state_msg)
         self.pose_action_pub.publish(self.right_arm_pose_action_msg)
@@ -459,7 +474,7 @@ class drlControl:
         # drl_tcp_client.read_data()
         
         # read robot data
-        # teleop.readRobotData()
+        self.readRobotData()
 
         
 
