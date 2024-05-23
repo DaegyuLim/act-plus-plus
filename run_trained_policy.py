@@ -62,7 +62,7 @@ def main(args):
 
     # load model parameters
     ckpt_dir = args['ckpt_dir']
-    ckpt_path = os.path.join(ckpt_dir, 'policy_best.ckpt')
+    ckpt_path = os.path.join(ckpt_dir, 'policy_last.ckpt')
     print('ckpt_path: ', ckpt_path)
     config_path = os.path.join(ckpt_dir, 'config.pkl')
     with open(config_path, 'rb') as f:

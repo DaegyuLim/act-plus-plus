@@ -34,8 +34,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
         if self.policy_class == 'Diffusion':
             self.augment_images = True
         else:
-            self.augment_images = False
-        self.transformations = False
+            self.augment_images = True
+        self.transformations = True
 
         self.use_depth = use_depth
     
@@ -76,8 +76,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     # dummy_base_action = np.zeros([action.shape[0], 2])
                     # action = np.concatenate([action, dummy_base_action], axis=-1)
                 
-                print(action[0, :])
-                
+                # print(action[0, :])
+
                 original_action_shape = action.shape
                 episode_len = original_action_shape[0]
                 # get observation at start_ts only
@@ -226,20 +226,22 @@ class EpisodicDataset(torch.utils.data.Dataset):
             t8 = time()
             # augmentation
             if self.transformations:
-                print('Initializing transformations')
                 original_size = image_data.shape[3:]
                 ratio = 0.95
                 self.transformations = [
                     transforms.RandomCrop(size=[int(original_size[0] * ratio), int(original_size[1] * ratio)]),
-                    transforms.Resize(original_size, antialias=True),
+                    transforms.Resize(original_size),
                     transforms.RandomRotation(degrees=[-5.0, 5.0], expand=False),
                     transforms.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5, hue=0.08)
                 ]
 
             if self.augment_images:
                 for k in range(image_data.shape[0]):
-                    for transform in self.transformations:
-                        image_data[k] = transform(image_data[k])
+                    for t in range(image_data.shape[1]):
+                        temp_image = image_data[k, t, :].clone()
+                        for transform in self.transformations:
+                            temp_image = transform(temp_image)
+                        image_data[k, t, :] = temp_image.clone()
             # normalize image and change dtype to float
             image_data = image_data / 255.0
 
