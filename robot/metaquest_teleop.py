@@ -466,6 +466,8 @@ class drlControl:
             self.dsr_desired_x_vel = self.calculateTragetVelocity(self.dsr_desired_x_pose_lpf)
 
             self.drl_tcp_client.send_command(self.control_mode, self.dsr_desired_x_vel)
+            if self.control_mode > 1:
+                self.control_mode = 0
 
     def step(self):
         # print(1e9*rospy.Time.now().secs + rospy.Time.now().nsecs)

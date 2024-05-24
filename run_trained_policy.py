@@ -62,7 +62,7 @@ def main(args):
 
     # load model parameters
     ckpt_dir = args['ckpt_dir']
-    ckpt_path = os.path.join(ckpt_dir, 'policy_best.ckpt')
+    ckpt_path = os.path.join(ckpt_dir, 'policy_last.ckpt')
     print('ckpt_path: ', ckpt_path)
     config_path = os.path.join(ckpt_dir, 'config.pkl')
     with open(config_path, 'rb') as f:
@@ -301,8 +301,8 @@ def main(args):
                 # print('all_action: ', all_action)
             
 
-                # print('action: ', action)
-                # print('robot_state: ', robot_state)
+                print('action: ', action)
+                print('robot_state: ', robot_state)
                 # dsr.set_action(action[0][:6])
                 # gripper.set_action(action[0][-1])
                 # for i in range(10):

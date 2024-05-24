@@ -31,11 +31,10 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.cumulative_len = np.cumsum(self.episode_len)
         self.max_episode_len = max(episode_len)
         self.policy_class = policy_class
-        if self.policy_class == 'Diffusion':
-            self.augment_images = True
-        else:
-            self.augment_images = False
+        
+        self.augment_images = False
         self.transformations = False
+        self.img_debug = False
 
         self.use_depth = use_depth
     
@@ -121,7 +120,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                                 # cv2.imshow('decoding', decompressed_depth)
                                 # cv2.waitKey()
                                 decompressed_depth_array.append(decompressed_depth)
-                            depth_image_dict[cam_name] = np.array(decompressed_image_array)
+                            depth_image_dict[cam_name] = np.array(decompressed_depth_array)
                 # print('depth_image_dict[cam_name].size: ', np.shape( np.array(depth_image_dict[cam_name])) )
                
                 # get all actions after and including start_ts 
@@ -228,20 +227,46 @@ class EpisodicDataset(torch.utils.data.Dataset):
             t8 = time()
             # augmentation
             if self.transformations:
-                print('Initializing transformations')
                 original_size = image_data.shape[3:]
+                # single_camera_size = original_size.copy()
+                # single_camera_size[1] *= 0.5
+                # print(original_size, single_camera_size)
                 ratio = 0.95
                 self.transformations = [
-                    transforms.RandomCrop(size=[int(original_size[0] * ratio), int(original_size[1] * ratio)]),
-                    transforms.Resize(original_size, antialias=True),
                     transforms.RandomRotation(degrees=[-5.0, 5.0], expand=False),
-                    transforms.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5, hue=0.08)
+                    transforms.RandomCrop(size=[int(original_size[0] * ratio), int(original_size[1]/2 * ratio)]),
+                    transforms.Resize(original_size[0]),
+                    transforms.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5, hue=0.04)
                 ]
+
+            image_data_for_show = torch.einsum('c h w -> h w c', image_data[0, 0, :]).numpy()
+            # print(image_data_for_show.shape)
+            
+            if self.img_debug:
+                cv2.imshow('original', image_data_for_show)
+                cv2.waitKey(0)
 
             if self.augment_images:
                 for k in range(image_data.shape[0]):
-                    for transform in self.transformations:
-                        image_data[k] = transform(image_data[k])
+                    for t in range(image_data.shape[1]):
+                        temp_left_image = image_data[k, t, :, :, :int(original_size[1]/2)].clone()
+                        print('temp_left_image.shape: ', temp_left_image.shape)
+                        temp_right_image = image_data[k, t, :, :, int(original_size[1]/2):].clone()
+                        print('temp_right_image.shape: ', temp_right_image.shape)
+                        for transform in self.transformations:
+                            temp_left_image = transform(temp_left_image)
+                            temp_right_image = transform(temp_right_image)
+
+                            image_data_for_show = torch.einsum('c h w -> h w c', temp_left_image).numpy()
+                            if self.img_debug:
+                                cv2.imshow(f'transform', image_data_for_show)
+                                cv2.waitKey(0)
+                        image_data[k, t, :, :, :int(original_size[1]/2)] = temp_left_image.clone()
+                        image_data[k, t, :, :, int(original_size[1]/2):] = temp_right_image.clone()
+                        if self.img_debug:
+                            image_data_for_show = torch.einsum('c h w -> h w c', image_data[k, t, :]).numpy()
+                            cv2.imshow('finally transfomed', image_data_for_show)
+                            cv2.waitKey(0)
             # normalize image and change dtype to float
             image_data = image_data / 255.0
 
