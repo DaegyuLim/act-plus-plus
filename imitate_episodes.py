@@ -65,7 +65,7 @@ def main(args):
     camera_names = task_config['camera_names']
     stats_dir = task_config.get('stats_dir', None)
     sample_weights = task_config.get('sample_weights', None)
-    train_ratio = task_config.get('train_ratio', 0.9)
+    train_ratio = task_config.get('train_ratio', 0.99)
     name_filter = task_config.get('name_filter', lambda n: True)
 
     # fixed parameters
@@ -97,6 +97,7 @@ def main(args):
                          'action_dim': action_dim,
                          'state_dim': state_dim,
                          'no_encoder': args['no_encoder'],
+                         'use_depth': use_depth,
                          }
     elif policy_class == 'Diffusion':
 
@@ -147,7 +148,6 @@ def main(args):
         'load_pretrain': args['load_pretrain'],
         'actuator_config': actuator_config,
         'wandb': is_wandb,
-        'use_depth': use_depth
     }
 
     if not os.path.isdir(ckpt_dir):
@@ -659,7 +659,7 @@ if __name__ == '__main__':
     parser.add_argument('--task_name', action='store', type=str, default='dsr_block_collect', help='task_name', required=True)
     parser.add_argument('--batch_size', action='store', type=int, default=16, help='batch_size', required=True)
     parser.add_argument('--seed', action='store', type=int, default=0, help='seed', required=True)
-    parser.add_argument('--num_steps', action='store', type=int, default=10000, help='num_steps', required=True)
+    parser.add_argument('--num_steps', action='store', type=int, default=100000, help='num_steps', required=True)
 
     parser.add_argument('--lr', action='store', type=float, default=1e-5, help='lr', required=False)
     parser.add_argument('--load_pretrain', action='store_true', default=False)

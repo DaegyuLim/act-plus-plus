@@ -31,16 +31,15 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.cumulative_len = np.cumsum(self.episode_len)
         self.max_episode_len = max(episode_len)
         self.policy_class = policy_class
-        if self.policy_class == 'Diffusion':
-            self.augment_images = True
-        else:
-            self.augment_images = True
-        self.transformations = True
+        
+        self.augment_images = False
+        self.transformations = False
+        self.img_debug = False
 
         self.use_depth = use_depth
     
-        self.reletive_action_mode = True
-        self.reletive_obs_mode = True
+        self.reletive_action_mode = False
+        self.reletive_obs_mode = False
         self.__getitem__(0) # initialize self.is_sim and self.transformations
         self.is_sim = False
         
@@ -75,9 +74,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     action = np.concatenate([ root['/actions/pose'][()], root['/actions/gripper_pos'][()] ], axis=-1)
                     # dummy_base_action = np.zeros([action.shape[0], 2])
                     # action = np.concatenate([action, dummy_base_action], axis=-1)
-                
-                # print(action[0, :])
 
+                # print('action[6]: ', action[:, 6])
                 original_action_shape = action.shape
                 episode_len = original_action_shape[0]
                 # get observation at start_ts only
@@ -122,7 +120,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                                 # cv2.imshow('decoding', decompressed_depth)
                                 # cv2.waitKey()
                                 decompressed_depth_array.append(decompressed_depth)
-                            depth_image_dict[cam_name] = np.array(decompressed_image_array)
+                            depth_image_dict[cam_name] = np.array(decompressed_depth_array)
                 # print('depth_image_dict[cam_name].size: ', np.shape( np.array(depth_image_dict[cam_name])) )
                
                 # get all actions after and including start_ts 
@@ -153,6 +151,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
             padded_robot_state = padded_robot_state[::-1] # padded_robot_state[0] is the current observation at start_ts
             
             t5 = time()
+            # print('padded_robot_state: ', padded_robot_state[0, 0:6])
+            # print('padded_action pre: ', padded_action[:10, 0:6])
+
             if self.reletive_action_mode:
                 reference_state_pos = padded_robot_state[0, 0:3]
                 reference_state_euler = padded_robot_state[0, 3:6]
@@ -166,7 +167,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     padded_action[t, 3:6] = rel_action_rotation.as_rotvec()
                     # position
                     padded_action[t, 0:3] = (reference_state_rotation.as_matrix().transpose()).dot(padded_action[t, 0:3] - reference_state_pos)
-                    # print('padded_action[t, 0:3]: ', padded_action[t, 0:3])
+                    # print('padded_action: ', t, ', ', padded_action[t, 0:3], ', ', padded_action[t, 3:6])
                     # print( (reference_state_rotation.as_matrix()))
                     # print( (reference_state_rotation.as_matrix().transpose()))
 
@@ -227,21 +228,45 @@ class EpisodicDataset(torch.utils.data.Dataset):
             # augmentation
             if self.transformations:
                 original_size = image_data.shape[3:]
+                # single_camera_size = original_size.copy()
+                # single_camera_size[1] *= 0.5
+                # print(original_size, single_camera_size)
                 ratio = 0.95
                 self.transformations = [
-                    transforms.RandomCrop(size=[int(original_size[0] * ratio), int(original_size[1] * ratio)]),
-                    transforms.Resize(original_size),
                     transforms.RandomRotation(degrees=[-5.0, 5.0], expand=False),
-                    transforms.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5, hue=0.08)
+                    transforms.RandomCrop(size=[int(original_size[0] * ratio), int(original_size[1]/2 * ratio)]),
+                    transforms.Resize(original_size[0]),
+                    transforms.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5, hue=0.04)
                 ]
+
+            image_data_for_show = torch.einsum('c h w -> h w c', image_data[0, 0, :]).numpy()
+            # print(image_data_for_show.shape)
+            
+            if self.img_debug:
+                cv2.imshow('original', image_data_for_show)
+                cv2.waitKey(0)
 
             if self.augment_images:
                 for k in range(image_data.shape[0]):
                     for t in range(image_data.shape[1]):
-                        temp_image = image_data[k, t, :].clone()
+                        temp_left_image = image_data[k, t, :, :, :int(original_size[1]/2)].clone()
+                        print('temp_left_image.shape: ', temp_left_image.shape)
+                        temp_right_image = image_data[k, t, :, :, int(original_size[1]/2):].clone()
+                        print('temp_right_image.shape: ', temp_right_image.shape)
                         for transform in self.transformations:
-                            temp_image = transform(temp_image)
-                        image_data[k, t, :] = temp_image.clone()
+                            temp_left_image = transform(temp_left_image)
+                            temp_right_image = transform(temp_right_image)
+
+                            image_data_for_show = torch.einsum('c h w -> h w c', temp_left_image).numpy()
+                            if self.img_debug:
+                                cv2.imshow(f'transform', image_data_for_show)
+                                cv2.waitKey(0)
+                        image_data[k, t, :, :, :int(original_size[1]/2)] = temp_left_image.clone()
+                        image_data[k, t, :, :, int(original_size[1]/2):] = temp_right_image.clone()
+                        if self.img_debug:
+                            image_data_for_show = torch.einsum('c h w -> h w c', image_data[k, t, :]).numpy()
+                            cv2.imshow('finally transfomed', image_data_for_show)
+                            cv2.waitKey(0)
             # normalize image and change dtype to float
             image_data = image_data / 255.0
 
@@ -352,7 +377,7 @@ def BatchSampler(batch_size, episode_len_l, sample_weights):
             batch.append(step_idx)
         yield batch
 
-def load_data(dataset_dir_l, name_filter, camera_names, batch_size_train, batch_size_val, chunk_size, robot_obs_size, img_obs_size, img_obs_skip, skip_mirrored_data=False, load_pretrain=False, policy_class=None, stats_dir_l=None, sample_weights=None, train_ratio=0.9, use_depth=False):
+def load_data(dataset_dir_l, name_filter, camera_names, batch_size_train, batch_size_val, chunk_size, robot_obs_size, img_obs_size, img_obs_skip, skip_mirrored_data=False, load_pretrain=False, policy_class=None, stats_dir_l=None, sample_weights=None, train_ratio=0.95, use_depth=False):
     if type(dataset_dir_l) == str:
         dataset_dir_l = [dataset_dir_l]
     dataset_path_list_list = [find_all_hdf5(dataset_dir, skip_mirrored_data) for dataset_dir in dataset_dir_l]
