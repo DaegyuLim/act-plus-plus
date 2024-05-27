@@ -75,7 +75,7 @@ def main(args):
     backbone = 'resnet18'
     if policy_class == 'ACT':
         enc_layers = 4
-        dec_layers = 6
+        dec_layers = 7
         nheads = 8
         policy_config = {'lr': args['lr'],
                          'num_queries': args['chunk_size'],
