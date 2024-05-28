@@ -67,7 +67,7 @@ def main(args):
     config_path = os.path.join(ckpt_dir, 'config.pkl')
     with open(config_path, 'rb') as f:
         config = pickle.load(f)
-        # print('config: \n', config)
+        print('config: \n', config)
     policy_class = config['policy_class']
     policy_config = config['policy_config']
     policy = make_policy(policy_class, policy_config)
@@ -303,8 +303,6 @@ def main(args):
 
                 print('action: ', action)
                 print('robot_state: ', robot_state)
-                # dsr.set_action(action[0][:6])
-                # gripper.set_action(action[0][-1])
                 # for i in range(10):
                 #     t1 = time.time()
                 #     dsr.step()
