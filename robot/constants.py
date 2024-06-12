@@ -10,8 +10,8 @@ TASK_CONFIGS = {
         'camera_names': ['lhand_camera', 'head_camera']
     },
     'dsr_block_sort':{
-        'dataset_dir': DATA_DIR + '/dsr_block_sort/240527_dark',
-        'episode_len': 4000,
+        'dataset_dir': DATA_DIR + '/dsr_block_sort',
+        'episode_len': 40000,
         'train_ratio': 0.95,
         'camera_names': ['lhand_camera']
     },

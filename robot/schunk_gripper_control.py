@@ -6,6 +6,7 @@
 
 import serial
 import threading
+import multiprocessing 
 import time
 import rospy
 import numpy as np
@@ -14,33 +15,37 @@ import struct
 from quest2ros.msg import OVR2ROSInputs
 from std_msgs.msg import Float32
 
-try:
-    ROBOT_ID     = rospy.get_param('/dsr/robot_id')
-except:
-    ROBOT_ID     = "dsr_l"
+
 
 ROBOT_MODEL  = "a0509"
 
 class gripperControl:
-    def __init__(self, robot_id = 'dsr_l', hz = 30, init_node = True, teleop=True):
+    def __init__(self, robot_id = 'dsr_l', serial_port = '/dev/ttyUSB1', hz = 30, init_node = True, teleop=True):
         self.hz = hz
         self.dt = 1/self.hz
         self.teleop = teleop
-
+        self.robot_id = robot_id
         if init_node:
-            rospy.init_node('schunk_gripper_control_py')
+            node_name = robot_id + '_schunk_gripper_control_py'
+            rospy.init_node(node_name)
         rospy.on_shutdown(self.shutdown)
 
-        self.ovr2ros_right_hand_inputs_sub = rospy.Subscriber("/q2r_right_hand_inputs",OVR2ROSInputs,self.ovr2ros_right_hand_inputs_callback)
+        # self.ovr2ros_right_hand_inputs_sub = rospy.Subscriber("/q2r_right_hand_inputs",OVR2ROSInputs,self.ovr2ros_right_hand_inputs_callback)
+        self.gello_trigger_inputs_sub = rospy.Subscriber(f'/{robot_id}/teleop/gello_hand_trigger', Float32,self.gello_right_hand_inputs_callback)
         
+        if robot_id == 'dsr_l':
+            self.gripper_id_byte = b'\x0C'
+        elif robot_id == 'dsr_r':
+            self.gripper_id_byte = b'\x0D'
+
         self.gripper_state_pub = rospy.Publisher('/'+robot_id +'/state/gripper', Float32, tcp_nodelay= True, queue_size= 1)
         self.gripper_action_pub = rospy.Publisher('/'+robot_id +'/action/gripper', Float32, tcp_nodelay= True, queue_size= 1)
 
         self.gripper_current_position = Float32()
         self.gripper_desired_position = Float32()
 
-        self.controller_inputs_raw = OVR2ROSInputs()
-        self.controller_inputs = OVR2ROSInputs()
+        self.controller_inputs_raw = 0.0
+        self.controller_inputs = 0.0
 
         self.gripper_desired_position_buffer = np.zeros(8)
 
@@ -52,7 +57,7 @@ class gripperControl:
         
         
         self.ser.baudrate = 115200
-        self.ser.port = '/dev/ttyUSB0'
+        self.ser.port = serial_port
         # ser.port = 'COM7'
         #ser.timeout =0
         self.ser.stopbits = serial.STOPBITS_ONE
@@ -65,9 +70,15 @@ class gripperControl:
 
         self.calculator = Calculator(Crc16.MODBUS, optimized=True)
 
-        self.init_bytes = b"\x0C\x10\x00\x47\x00\x08\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x3A\x7C"
-        self.sync_bytes = b"\x0C\x10\x00\x47\x00\x08\x10\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xF9\x2F"
-        self.request_state_bytes = b"\x0C\x03\x00\x3F\x00\x08\x75\x1D"
+        self.init_bytes = self.gripper_id_byte + b"\x10\x00\x47\x00\x08\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        self.init_bytes += self.calculator.checksum(self.init_bytes).to_bytes(2, 'little', signed=False) #CRC
+
+        self.sync_bytes = self.gripper_id_byte + b"\x10\x00\x47\x00\x08\x10\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        self.sync_bytes += self.calculator.checksum(self.sync_bytes).to_bytes(2, 'little', signed=False) #CRC
+
+        self.request_state_bytes = self.gripper_id_byte + b"\x03\x00\x3F\x00\x08"
+        self.request_state_bytes += self.calculator.checksum(self.request_state_bytes).to_bytes(2, 'little', signed=False) #CRC
+
         self.loop_tick = 0
 
         self.bytes_buffer = b''
@@ -89,11 +100,14 @@ class gripperControl:
         self.ser.open()
         if not self.ser.is_open:
             print("[ERROR] gripper serial socket is not opened") 
+        else:
+            print(f"gripper serial port is opened! ({self.ser.port})")
+
         rospy.sleep(0.5)
         self.ser.write(self.init_bytes)
         rospy.sleep(0.5)
         self.ser.write(self.sync_bytes)
-        time.sleep(0.01)
+        time.sleep(0.5)
         self.init_time = rospy.Time.now()
 
     def read_state(self):
@@ -127,7 +141,7 @@ class gripperControl:
                         self.buffer_size -= 1
                 # print("bytes: ", self.bytes_buffer)
 
-                if self.bytes_buffer[0:3] == b'\x0C\x03\x10':
+                if self.bytes_buffer[0:3] == (self.gripper_id_byte + b'\x03\x10'):
                     # print("find bytes!: ", self.bytes_buffer)
                     check_crc = self.calculator.checksum(self.bytes_buffer[0:19]).to_bytes(2, 'little', signed=False) == self.bytes_buffer[19:21]
                     if check_crc:
@@ -231,8 +245,8 @@ class gripperControl:
         self.control()
 
     def control_loop(self):
+        print(f"GRIPPER CONTROL START ({self.robot_id})")
         rate = rospy.Rate(self.hz)
-        print("GRIPPER CONTROL START")
         while not rospy.is_shutdown():
             if self.stop_control_loop:
                 return
@@ -257,7 +271,7 @@ class gripperControl:
     def readTriggerInputs(self):
         self.controller_inputs = self.controller_inputs_raw
         self.gripper_desired_position_buffer[1:] = self.gripper_desired_position_buffer[0:-1]
-        self.gripper_desired_position_buffer[0] = self.controller_inputs.press_index
+        self.gripper_desired_position_buffer[0] = self.controller_inputs
         self.gripper_command = np.mean(self.gripper_desired_position_buffer)
 
     def readPolicyCommand(self):
@@ -270,16 +284,19 @@ class gripperControl:
         
         gripper_position_command = desired_gripper_pos_um.to_bytes(4, 'little', signed=True)
         
-        head_bytes = b"\x0C\x10\x00\x47\x00\x08\x10\x01\x20\x00\x00"
+        head_bytes = self.gripper_id_byte + b'\x10\x00\x47\x00\x08\x10\x01\x20\x00\x00'
         velocity_bytes = b"\x38\xC1\x01\x00"
         force_bytes = gripper_force.to_bytes(4, 'little', signed=True)
         gripper_command_bytes = head_bytes + gripper_position_command + velocity_bytes + force_bytes
         
-        gripper_command_bytes += self.calculator.checksum(gripper_command_bytes).to_bytes(2, 'little', signed=False)
+        gripper_command_bytes += self.calculator.checksum(gripper_command_bytes).to_bytes(2, 'little', signed=False) #CRC
         self.ser.write(gripper_command_bytes)
 
     def ovr2ros_right_hand_inputs_callback(self, data):    
-        self.controller_inputs_raw = data
+        self.controller_inputs_raw = data.press_index
+        
+    def gello_right_hand_inputs_callback(self, data):    
+        self.controller_inputs_raw = data.data
 
     def shutdown(self):
         self.ser.reset_input_buffer()
@@ -290,6 +307,41 @@ class gripperControl:
         return 0
 
 if __name__ == "__main__":
-    gripper = gripperControl()
+    left_gripper = gripperControl(robot_id = 'dsr_l', serial_port = '/dev/schunk_l', init_node=True, teleop=True)
+    right_gripper = gripperControl(robot_id = 'dsr_r', serial_port = '/dev/schunk_r', init_node=False, teleop=True)
+    
+    right_thread = threading.Thread(target=right_gripper.control_loop)
+    left_thread = threading.Thread(target=left_gripper.control_loop)
+    # time.sleep(1.0)
+    
+    
+    
+    # left_process = multiprocessing.Process(target=left_gripper.control_loop)
+    # right_process = multiprocessing.Process(target=right_gripper.control_loop)
 
-    gripper.control_loop()
+    
+    
+    
+    # rate = rospy.Rate(30)
+    # print("GRIPPER CONTROL START")
+    # while True:
+    #     left_gripper.step()
+    #     right_gripper.step()
+    #     rate.sleep()
+
+    
+    right_thread.start()
+    left_thread.start()
+
+    # right_thread.join()
+    # left_thread.join()
+    # while True:
+    #     right_gripper.control_loop()
+    #     left_gripper.control_loop()
+
+    # right_process.start()
+    # left_process.start()
+
+    # right_process.join()
+    # left_process.join()
+    # gripper.control_loop()

@@ -23,6 +23,7 @@ from scipy.spatial.transform import Rotation
 
 from policy import ACTPolicy, CNNMLPPolicy, DiffusionPolicy
 import torch
+import torch.nn as nn
 from einops import rearrange
 
 from robot.metaquest_teleop import drlControl
@@ -62,7 +63,7 @@ def main(args):
 
     # load model parameters
     ckpt_dir = args['ckpt_dir']
-    ckpt_path = os.path.join(ckpt_dir, 'policy_last.ckpt')
+    ckpt_path = os.path.join(ckpt_dir, 'policy_best.ckpt')
     print('ckpt_path: ', ckpt_path)
     config_path = os.path.join(ckpt_dir, 'config.pkl')
     with open(config_path, 'rb') as f:
@@ -71,6 +72,7 @@ def main(args):
     policy_class = config['policy_class']
     policy_config = config['policy_config']
     policy = make_policy(policy_class, policy_config)
+    policy.model = nn.DataParallel(policy.model)
     loading_status = policy.deserialize(torch.load(ckpt_path))
     print(f'Loaded policy from: {ckpt_path} ({loading_status})')
     policy.cuda()
@@ -152,6 +154,8 @@ def main(args):
 
     print('Are you ready?')
     for cnt in range(3):
+        if rospy.is_shutdown():
+            break
         print(3 - cnt, 'seconds before to start!!!')
         time.sleep(1.0)
 
@@ -301,8 +305,8 @@ def main(args):
                 # print('all_action: ', all_action)
             
 
-                print('action: ', action)
-                print('robot_state: ', robot_state)
+                # print('action: ', action)
+                # print('robot_state: ', robot_state)
                 # for i in range(10):
                 #     t1 = time.time()
                 #     dsr.step()
