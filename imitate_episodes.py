@@ -155,7 +155,7 @@ def main(args):
     config_path = os.path.join(ckpt_dir, 'config.pkl')
     expr_name = ckpt_dir.split('/')[-1]
     if is_wandb and not is_eval:
-        wandb.init(project="robros-dsr-bc-test", reinit=True, entity="daegyulim", name=expr_name)
+        wandb.init(project="robros_dsr_block_sort_ablation", reinit=True, entity="daegyulim", name=expr_name)
         wandb.config.update(config)
     with open(config_path, 'wb') as f:
         pickle.dump(config, f)

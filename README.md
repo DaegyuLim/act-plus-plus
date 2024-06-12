@@ -33,16 +33,19 @@ You can find all scripted/human demo for simulated environments [here](https://d
     pip install pyyaml
     pip install rospkg
     pip install pexpect
-    pip install mujoco==2.3.7
-    pip install dm_control==1.0.14
     pip install opencv-python
     pip install matplotlib
     pip install einops
     pip install packaging
     pip install h5py
     pip install ipython
+    pip install scipy
+    pip install wandb
     cd act/detr && pip install -e .
 
+for usage of GPT server first time
+    apt-get update && apt-get install ffmpeg libsm6 libxext6  -y
+    
 - also need to install https://github.com/ARISE-Initiative/robomimic/tree/r2d2 (note the r2d2 branch) for Diffusion Policy by `pip install -e .`
 
 ### Example Usages
