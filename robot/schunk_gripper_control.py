@@ -19,8 +19,8 @@ from std_msgs.msg import Float32
 
 ROBOT_MODEL  = "a0509"
 
-class gripperControl:
-    def __init__(self, robot_id = 'dsr_l', serial_port = '/dev/ttyUSB1', hz = 30, init_node = True, teleop=True):
+class singleGripperControl:
+    def __init__(self, robot_id = 'dsr_l', serial_port = '/dev/ttyUSB1', hz = 30, init_node = False, teleop=True):
         self.hz = hz
         self.dt = 1/self.hz
         self.teleop = teleop
@@ -177,7 +177,7 @@ class gripperControl:
 
         self.ser.write(self.request_state_bytes)
         self.data_read_trigger = True
-        time.sleep(0.008)
+        time.sleep(0.010)
         #calculate command bytes
         # elapsed_time = (rospy.Time.now() - self.init_time).to_nsec()/1e9
 
@@ -203,15 +203,15 @@ class gripperControl:
         # gripper_command_bytes += self.calculator.checksum(gripper_command_bytes).to_bytes(2, 'little', signed=False)
         
         # self.ser.write(gripper_command_bytes)
-        time.sleep(0.008)
+        time.sleep(0.010)
 
         self.ser.write(self.sync_bytes)
-        time.sleep(0.008)
+        # time.sleep(0.008)
         ## read current gripper position
         
-        self.ser.reset_input_buffer()
-        self.data_read_trigger = True
-        self.ser.write(self.request_state_bytes)
+        # self.ser.reset_input_buffer()
+        # self.data_read_trigger = True
+        # self.ser.write(self.request_state_bytes)
 
 
         # time.sleep(0.01)
@@ -249,7 +249,7 @@ class gripperControl:
         rate = rospy.Rate(self.hz)
         while not rospy.is_shutdown():
             if self.stop_control_loop:
-                return
+                break
             self.step()
             rate.sleep()
 
@@ -299,6 +299,7 @@ class gripperControl:
         self.controller_inputs_raw = data.data
 
     def shutdown(self):
+        self.stop_control_loop = True
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
         self.ser.close()
@@ -306,42 +307,66 @@ class gripperControl:
 
         return 0
 
+
+class gripperControl:
+    def __init__(self, robot_id_list = ['dsr_l'], hz = 30, init_node=True, teleop=True):
+
+        if init_node:
+            rospy.init_node('gripper_control_py')
+
+        self.hz = hz
+        self.teleop = teleop
+        self.robot_id_list = robot_id_list
+        self.num_grippers = len(self.robot_id_list)
+
+        self.gripper_list = []
+        self.gripper_thread_list = []
+        for idx, robot_id in enumerate(self.robot_id_list):
+            print('idx: ', idx, robot_id)
+            if robot_id == 'dsr_l':
+                gripper_static_port = '/dev/schunk_l'
+            elif robot_id == 'dsr_r':
+                gripper_static_port = '/dev/schunk_r'
+            else:
+                raise NotImplementedError
+            
+            self.gripper_list.append(singleGripperControl(robot_id = robot_id, serial_port=gripper_static_port, hz = self.hz, init_node=False, teleop=self.teleop))
+            self.gripper_thread_list.append(threading.Thread(target=self.gripper_list[idx].control_loop))
+
+    def control_thread_start(self):
+        for idx in range(self.num_grippers):
+            self.gripper_thread_list[idx].start()
+    
+    def control_thread_stop(self):
+        for idx in range(self.num_grippers):
+            self.gripper_list[idx].stop_control_loop =True
+
+    def open(self):
+        for idx in range(self.num_grippers):
+            self.gripper_list[idx].open()
+    
+    def close(self):
+        for idx in range(self.num_grippers):
+            self.gripper_list[idx].close()
+
+    def get_state(self):
+        gripper_states = np.zeros(self.num_grippers)
+        for idx in range(self.num_grippers):
+            gripper_states[idx] = self.gripper_list[idx].gripper_state
+        return gripper_states
+    
+    def get_action(self):
+        gripper_actions = np.zeros(self.num_grippers)
+        for idx in range(self.num_grippers):
+            gripper_actions[idx] = self.gripper_list[idx].gripper_command
+        return gripper_actions
+    
+    def set_action(self, gripper_action):
+        for idx in range(self.num_grippers):
+            self.gripper_list[idx].policy_gripper_command = gripper_action[idx]
+        # self.policy_gripper_command = gripper_action
+    
+
 if __name__ == "__main__":
-    left_gripper = gripperControl(robot_id = 'dsr_l', serial_port = '/dev/schunk_l', init_node=True, teleop=True)
-    right_gripper = gripperControl(robot_id = 'dsr_r', serial_port = '/dev/schunk_r', init_node=False, teleop=True)
-    
-    right_thread = threading.Thread(target=right_gripper.control_loop)
-    left_thread = threading.Thread(target=left_gripper.control_loop)
-    # time.sleep(1.0)
-    
-    
-    
-    # left_process = multiprocessing.Process(target=left_gripper.control_loop)
-    # right_process = multiprocessing.Process(target=right_gripper.control_loop)
-
-    
-    
-    
-    # rate = rospy.Rate(30)
-    # print("GRIPPER CONTROL START")
-    # while True:
-    #     left_gripper.step()
-    #     right_gripper.step()
-    #     rate.sleep()
-
-    
-    right_thread.start()
-    left_thread.start()
-
-    # right_thread.join()
-    # left_thread.join()
-    # while True:
-    #     right_gripper.control_loop()
-    #     left_gripper.control_loop()
-
-    # right_process.start()
-    # left_process.start()
-
-    # right_process.join()
-    # left_process.join()
-    # gripper.control_loop()
+    gripper_control = gripperControl(robot_id_list = ['dsr_l', 'dsr_r'], init_node=True, teleop=True)
+    gripper_control.control_thread_start()

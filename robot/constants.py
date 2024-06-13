@@ -7,14 +7,23 @@ TASK_CONFIGS = {
     'dsr_block_collect':{
         'dataset_dir': DATA_DIR + '/dsr_block_collect',
         'episode_len': 4000,
-        'camera_names': ['lhand_camera', 'head_camera']
+        'camera_names': ['lhand_camera', 'head_camera'],
+        'robot_id_list': ['dsr_l'],
     },
     'dsr_block_sort':{
         'dataset_dir': DATA_DIR + '/dsr_block_sort',
         'episode_len': 4000,
         'train_ratio': 0.95,
-        'camera_names': ['lhand_camera']
+        'camera_names': ['lhand_camera'],
+        'robot_id_list': ['dsr_l'],
     },
+    'dsr_block_disassemble_and_sort':{
+        'dataset_dir': DATA_DIR + '/dsr_block_disassemble_and_sort',
+        'episode_len': 400,
+        'train_ratio': 0.95,
+        'camera_names': ['lhand_camera', 'rhand_camera'],
+        'robot_id_list': ['dsr_l', 'dsr_r'],
+    }
 }
 
 HZ = 30

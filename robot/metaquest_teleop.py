@@ -165,10 +165,13 @@ class dsrSingleArmControl:
             print('waiting robot data read from DSL tcp server...')
         
         self.dsr_desired_x_pose_lpf[:] = self.drl_tcp_client.current_posx[:]
+
+        self.stop_control_loop = False
         
 
     def shutdown(self):
         print(f"\n DSR({self.robot_id}) CONTROL SHUTDOWN! \n")
+        self.stop_control_loop = True
         self.drl_tcp_client.shutdown()
         return 0
 
@@ -485,9 +488,9 @@ class dsrSingleArmControl:
         # read robot data
         self.readRobotData()
 
-        if self.tick % self.hz == 0:
-            print("teleop.current_dsr_pos: ", self.current_dsr_pos[0:3])
-            print("teleop.dsr_desired_x_pos_lpf: ", self.dsr_desired_x_pose_lpf[0:3])
+        # if self.tick % self.hz == 0:
+        #     print("teleop.current_dsr_pos: ", self.current_dsr_pos[0:3])
+        #     print("teleop.dsr_desired_x_pos_lpf: ", self.dsr_desired_x_pose_lpf[0:3])
         # make motion of DSR
         if self.teleop:
             self.readControllerInputs()
@@ -511,6 +514,8 @@ class dsrSingleArmControl:
         # rate = rospy.Rate(20)
         
         while not rospy.is_shutdown():
+            if self.stop_control_loop:
+                break
             self.step()
             rate.sleep()
         print('good bye!')
@@ -598,8 +603,8 @@ class TcpClient:
 class drlControl:
     def __init__(self, robot_id_list = ['dsr_l'], hz = 30, init_node=True, teleop=True):
         
-        # if init_node:
-        #     rospy.init_node('metaquest_teleop_py')
+        if init_node:
+            rospy.init_node('dsr_teleop_control_py')
 
         self.hz = hz
         self.teleop = teleop
@@ -612,11 +617,14 @@ class drlControl:
             print('idx: ', idx, robot_id)
             self.dsr_list.append(dsrSingleArmControl(robot_id = robot_id, hz = self.hz, teleop=self.teleop))
             self.dsr_thread_list.append(threading.Thread(target=self.dsr_list[idx].control_loop))
-            # self.dsr_thread_list[idx].daemon = True
 
     def control_thread_start(self):
         for idx in range(self.num_robots):
             self.dsr_thread_list[idx].start()
+    
+    def control_thread_stop(self):
+        for idx in range(self.num_robots):
+            self.dsr_list[idx].stop_control_loop = True
 
     def stop(self):
         for idx in range(self.num_robots):
@@ -654,7 +662,7 @@ class drlControl:
                 self.dsr_list[idx].dsr_desired_x_pose_lpf[i] = target_pose[6*idx+i]
 
 if __name__ == "__main__":
-    rospy.init_node('metaquest_teleop_py')
+    # rospy.init_node('metaquest_teleop_py')
     # dsr_l = dsrSingleArmControl(robot_id = 'dsr_l', hz = 30, teleop=True)
 
     # dsr_l_thread = threading.Thread(target=dsr_l.control_loop)
@@ -663,6 +671,7 @@ if __name__ == "__main__":
 
     # dsr_l.control_loop()
 
-    drlcontrol = drlControl(robot_id_list=['dsr_l', 'dsr_r'], hz = 30, init_node=True, teleop= True)
+    # drlcontrol = drlControl(robot_id_list=['dsr_l', 'dsr_r'], hz = 30, init_node=True, teleop= True)
+    drlcontrol = drlControl(robot_id_list=['dsr_r'], hz = 30, init_node=True, teleop= True)
     drlcontrol.control_thread_start()
     
