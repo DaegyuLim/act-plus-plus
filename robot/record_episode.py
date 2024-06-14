@@ -33,11 +33,12 @@ def main(args):
     max_timesteps = task_config['episode_len']
     camera_names = task_config['camera_names']
     robot_id_list = task_config['robot_id_list']
+    num_robots = len(robot_id_list)
 
     image_recorder = ImageRecorder(camera_names = task_config['camera_names'], init_node=False)
     dsr = drlControl(robot_id_list = robot_id_list, hz = HZ, init_node=True, teleop=True)
     gripper = gripperControl(robot_id_list = robot_id_list, hz = HZ, init_node=False, teleop=True)
-    master_arms = dsrMasterArm(robot_id_list = robot_id_list, hz=50, init_node=False)
+    master_arms = dsrMasterArm(robot_id_list = robot_id_list, hz=40, init_node=False)
 
     master_arms.set_init_q('dsr_l', [180.0,180.0,180.0,180.0,180.0,0.0,180.0])
     master_arms.set_joint_axis('dsr_l', [1,1,-1,1,-1,1,1])
@@ -103,17 +104,11 @@ def main(args):
         #     images = image_recorder.get_images()
     print('Hold Master Arm Handle and wait for connection')
     master_arms.dsrConnect(connect_delay=5.0, connect_spline_duration= 3.0)
-    time.sleep(0.05)
-    for cnt in range(5):
-        print(5 - cnt, 'seconds before to be connected!!!')
-        time.sleep(1.0)
-        if rospy.is_shutdown():
-                break
+    time.sleep(5.0)
 
-
-    print('Are you ready? Move the robot to the desired initial pose')
+    print('Are you ready? Move the robot to the desired initial pose.')
     for cnt in range(10):
-        print(10 - cnt, 'seconds before to start!!!')
+        print(10 - cnt, 'seconds before to start DATA COLLECTION!!!')
         time.sleep(1.0)
         if rospy.is_shutdown():
                 break
@@ -121,7 +116,7 @@ def main(args):
     #ready gripper thread
 
 
-    print('Start!')
+    print('DATA COLLECTION Start!')
     time0 = time.time()
     for t in tqdm(range(max_timesteps)):
         t0 = time.time() #
@@ -180,6 +175,7 @@ def main(args):
 
     dsr.control_thread_stop()
     gripper.control_thread_stop()
+    master_arms.thread_stop()
 
 
     COMPRESS = True
@@ -260,11 +256,11 @@ def main(args):
                                          chunks=(1, 360, 1280, 3), )
                 # _ = depth.create_dataset(cam_name, (max_timesteps, 360, 1280), dtype='uint8',
                 #                         chunks=(1, 360, 1280, 1), )
-        _ = obs.create_dataset('xpos', (max_timesteps, 3))
-        _ = obs.create_dataset('euler', (max_timesteps, 3))
-        _ = obs.create_dataset('gripper_pos', (max_timesteps, 1))
-        _ = actions.create_dataset('pose', (max_timesteps, 6))
-        _ = actions.create_dataset('gripper_pos', (max_timesteps, 1))
+        _ = obs.create_dataset('xpos', (max_timesteps, 3*num_robots))
+        _ = obs.create_dataset('euler', (max_timesteps, 3*num_robots))
+        _ = obs.create_dataset('gripper_pos', (max_timesteps, 1*num_robots))
+        _ = actions.create_dataset('pose', (max_timesteps, 6*num_robots))
+        _ = actions.create_dataset('gripper_pos', (max_timesteps, 1*num_robots))
 
         for name, array in data_dict.items():
             root[name][...] = array

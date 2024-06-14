@@ -205,6 +205,8 @@ class dsrMasterArmCore:
         self.initial_position = [180.0,180.0,180.0,180.0,180.0,0.0,180.0]  # 초기 위치 저장
         self.joint_axis = [1,1,-1,1,-1,1,1]  # 초기 위치 저장
 
+        self.stop_control_loop = False
+
     def dsr_pose_callback(self, data):
         self.dsr_hand_pose_raw = data
         self.dsr_pose_rcv_tick = self.tick
@@ -405,6 +407,13 @@ class dsrMasterArmCore:
             
 
             if self.tick <= self.connect_start_tick + (self.connect_start_delay)*self.hz:
+                delay_tick = self.tick - self.connect_start_tick
+                if ((self.connect_start_delay)*self.hz - delay_tick)%self.hz == 0:
+                    remain_time = self.connect_start_delay - delay_tick/self.hz
+                    if remain_time == 0.0:
+                        print('Connect!')
+                    else:
+                        print(f'{self.robot_id} master arm will be connected in {remain_time} seconds')
                 self.desired_pose = self.connect_init_pose
 
             elif self.tick > self.connect_start_tick + (self.connect_start_delay)*self.hz and self.tick <= self.connect_start_tick + (self.connect_start_delay + self.connect_spline_duration)*self.hz:
@@ -517,11 +526,14 @@ class dsrMasterArmCore:
             if self.home_pose_signal.data == True:
                 self.home_pose_signal.data = False
 
+            if self.stop_control_loop:
+                break
             self.rate.sleep()
     
     def shutdown(self):
         # TORQUE OFF MOTOR
         print("DXL MOTORS TORQUE OFF")
+        self.stop_control_loop = True
         for DXL_ID in range(1, NUM_JOINTS+1): 
             self.packetHandler.write1ByteTxOnly(self.portHandler, DXL_ID, DXL_TORQUE_ENABLE_ADDR, TORQUE_OFF)
         # 포트 닫기
@@ -555,7 +567,7 @@ class dsrMasterArm:
             self.master_thread_list.append(threading.Thread(target=self.master_list[idx].main))
             self.master_thread_list[idx].daemon = True
 
-    def dsrConnect(self, connect_delay = 0.0, connect_spline_duration = 3.0):
+    def dsrConnect(self, connect_delay = 3.0, connect_spline_duration = 3.0):
         for idx in range(self.num_robots):
             self.master_list[idx].dsrConnect(connect_delay = connect_delay, connect_spline_duration = connect_spline_duration)
     
@@ -570,6 +582,10 @@ class dsrMasterArm:
     def thread_start(self):
         for idx in range(self.num_robots):
             self.master_thread_list[idx].start()    
+
+    def thread_stop(self):
+        for idx in range(self.num_robots):
+            self.master_list[idx].stop_control_loop =True
 
     def set_init_q(self, robot_id, init_q):
         for idx, robot_id_in_list in enumerate(self.robot_id_list):
@@ -604,11 +620,12 @@ class dsrMasterArm:
 
     def shutdown(self):
         print('DXL-DSR Master Arm is shutdown!')
+        self.thread_stop()
         self.window.quit()
 
 if __name__ == "__main__":
-    # master_arms = dsrMasterArm(robot_id_list = ['dsr_l', 'dsr_r'], hz=50, init_node=True)
-    master_arms = dsrMasterArm(robot_id_list = ['dsr_r'], hz=50, init_node=True)
+    master_arms = dsrMasterArm(robot_id_list = ['dsr_l', 'dsr_r'], hz=50, init_node=True)
+    # master_arms = dsrMasterArm(robot_id_list = ['dsr_r'], hz=50, init_node=True)
     master_arms.thread_start()
 
     master_arms.set_init_q('dsr_l', [180.0,180.0,180.0,180.0,180.0,0.0,180.0])

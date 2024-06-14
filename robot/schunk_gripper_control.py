@@ -31,7 +31,7 @@ class singleGripperControl:
         rospy.on_shutdown(self.shutdown)
 
         # self.ovr2ros_right_hand_inputs_sub = rospy.Subscriber("/q2r_right_hand_inputs",OVR2ROSInputs,self.ovr2ros_right_hand_inputs_callback)
-        self.gello_trigger_inputs_sub = rospy.Subscriber(f'/{robot_id}/teleop/gello_hand_trigger', Float32,self.gello_right_hand_inputs_callback)
+        self.gello_trigger_inputs_sub = rospy.Subscriber(f'/{robot_id}/teleop/gello_hand_trigger', Float32,self.gello_trigger_inputs_callback)
         
         if robot_id == 'dsr_l':
             self.gripper_id_byte = b'\x0C'
@@ -93,6 +93,10 @@ class singleGripperControl:
         self.thread1 = threading.Thread(target=self.read_state)
         self.thread1.daemon = True 
         self.thread1.start()
+
+        # self.state_read_process = multiprocessing.Process(target=self.read_state)
+        # self.state_read_process.daemon = True
+        # self.state_read_process.start()
 
         self.stop_control_loop = False
 
@@ -177,7 +181,7 @@ class singleGripperControl:
 
         self.ser.write(self.request_state_bytes)
         self.data_read_trigger = True
-        time.sleep(0.010)
+        time.sleep(0.008)
         #calculate command bytes
         # elapsed_time = (rospy.Time.now() - self.init_time).to_nsec()/1e9
 
@@ -203,11 +207,10 @@ class singleGripperControl:
         # gripper_command_bytes += self.calculator.checksum(gripper_command_bytes).to_bytes(2, 'little', signed=False)
         
         # self.ser.write(gripper_command_bytes)
-        time.sleep(0.010)
-
+        time.sleep(0.020)
         self.ser.write(self.sync_bytes)
         # time.sleep(0.008)
-        ## read current gripper position
+        # # read current gripper position
         
         # self.ser.reset_input_buffer()
         # self.data_read_trigger = True
@@ -230,7 +233,7 @@ class singleGripperControl:
 
         consumed_time_us = float((time_end - time_start).nsecs)*1e-3 # [us]  
         if consumed_time_us > self.dt*1e6:
-            print("Warning! gripper control elapsed_time [us]: ", consumed_time_us, "is over the control period")
+            print("Warning! gripper control elapsed_time [us]: ", consumed_time_us, "is over the control period in ", self.robot_id, "-gripper")
 
         # if self.loop_tick % self.hz == 0:
         #     print("gripper_state: ", self.gripper_state)
@@ -295,7 +298,7 @@ class singleGripperControl:
     def ovr2ros_right_hand_inputs_callback(self, data):    
         self.controller_inputs_raw = data.press_index
         
-    def gello_right_hand_inputs_callback(self, data):    
+    def gello_trigger_inputs_callback(self, data):   
         self.controller_inputs_raw = data.data
 
     def shutdown(self):
@@ -332,6 +335,7 @@ class gripperControl:
             
             self.gripper_list.append(singleGripperControl(robot_id = robot_id, serial_port=gripper_static_port, hz = self.hz, init_node=False, teleop=self.teleop))
             self.gripper_thread_list.append(threading.Thread(target=self.gripper_list[idx].control_loop))
+            # self.gripper_thread_list.append(multiprocessing.Process(target=self.gripper_list[idx].control_loop))
 
     def control_thread_start(self):
         for idx in range(self.num_grippers):
@@ -340,6 +344,9 @@ class gripperControl:
     def control_thread_stop(self):
         for idx in range(self.num_grippers):
             self.gripper_list[idx].stop_control_loop =True
+            self.gripper_thread_list[idx].join()
+            # self.gripper_list[idx].state_read_process.join()
+            
 
     def open(self):
         for idx in range(self.num_grippers):
