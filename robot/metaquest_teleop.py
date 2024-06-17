@@ -671,7 +671,7 @@ if __name__ == "__main__":
 
     # dsr_l.control_loop()
 
-    # drlcontrol = drlControl(robot_id_list=['dsr_l', 'dsr_r'], hz = 30, init_node=True, teleop= True)
-    drlcontrol = drlControl(robot_id_list=['dsr_r'], hz = 30, init_node=True, teleop= True)
+    # drlcontrol = drlControl(robot_id_list=['dsr_l', 'dsr_r'], hz = 20, init_node=True, teleop= True)
+    drlcontrol = drlControl(robot_id_list=['dsr_r'], hz = 20, init_node=True, teleop= True)
     drlcontrol.control_thread_start()
     

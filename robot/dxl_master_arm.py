@@ -624,8 +624,8 @@ class dsrMasterArm:
         self.window.quit()
 
 if __name__ == "__main__":
-    master_arms = dsrMasterArm(robot_id_list = ['dsr_l', 'dsr_r'], hz=50, init_node=True)
-    # master_arms = dsrMasterArm(robot_id_list = ['dsr_r'], hz=50, init_node=True)
+    # master_arms = dsrMasterArm(robot_id_list = ['dsr_l', 'dsr_r'], hz=40, init_node=True)
+    master_arms = dsrMasterArm(robot_id_list = ['dsr_r'], hz=50, init_node=True)
     master_arms.thread_start()
 
     master_arms.set_init_q('dsr_l', [180.0,180.0,180.0,180.0,180.0,0.0,180.0])

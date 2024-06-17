@@ -18,8 +18,8 @@ TASK_CONFIGS = {
         'robot_id_list': ['dsr_l'],
     },
     'dsr_block_disassemble_and_sort':{
-        'dataset_dir': DATA_DIR + '/dsr_block_disassemble_and_sort/240614_sort_only',
-        'episode_len': 4000,
+        'dataset_dir': DATA_DIR + '/dsr_block_disassemble_and_sort/240617_disassemble_and_sort',
+        'episode_len': 1800,
         'train_ratio': 0.95,
         'camera_names': ['lhand_camera', 'rhand_camera'],
         'robot_id_list': ['dsr_l', 'dsr_r'],
