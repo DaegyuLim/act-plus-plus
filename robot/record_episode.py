@@ -22,26 +22,35 @@ from tqdm import tqdm
 from metaquest_teleop import drlControl
 from schunk_gripper_control import gripperControl
 from robot_utils import ImageRecorder
+from dxl_master_arm import dsrMasterArm
 
 # for single robot 
-try:
-    ROBOT_ID     = rospy.get_param('/dsr/robot_id')
-except:
-    ROBOT_ID     = "dsr_l"
-ROBOT_MODEL = "a0509"
-
 
 
 def main(args):
-    image_recorder = ImageRecorder(init_node=False)
-    dsr = drlControl(ROBOT_ID, HZ, init_node=True, teleop=True)
-    gripper = gripperControl(ROBOT_ID, HZ, init_node=False, teleop=True)
-
     task_config = TASK_CONFIGS[args['task_name']]
     dataset_dir = task_config['dataset_dir']
     max_timesteps = task_config['episode_len']
     camera_names = task_config['camera_names']
-    
+    robot_id_list = task_config['robot_id_list']
+    num_robots = len(robot_id_list)
+
+    image_recorder = ImageRecorder(camera_names = task_config['camera_names'], init_node=False)
+    dsr = drlControl(robot_id_list = robot_id_list, hz = HZ, init_node=True, teleop=True)
+    gripper = gripperControl(robot_id_list = robot_id_list, hz = HZ, init_node=False, teleop=True)
+    master_arms = dsrMasterArm(robot_id_list = robot_id_list, hz=40, init_node=False)
+
+    master_arms.set_init_q('dsr_l', [180.0,180.0,180.0,180.0,180.0,0.0,180.0])
+    master_arms.set_joint_axis('dsr_l', [1,1,-1,1,-1,1,1])
+
+    master_arms.set_init_q('dsr_r', [270.0,180.0,180.0,180.0,180.0,-180.0,180.0])
+    master_arms.set_joint_axis('dsr_r', [1,1,-1,1,-1,1,1])
+
+    dsr.control_thread_start()
+    gripper.control_thread_start()
+    time.sleep(1.0)
+    master_arms.thread_start()
+
     if args['episode_idx'] is not None:
         episode_idx = args['episode_idx']
     else:
@@ -93,26 +102,25 @@ def main(args):
         #         break
         #     time.sleep(1.0)
         #     images = image_recorder.get_images()
+    print('Hold Master Arm Handle and wait for connection')
+    master_arms.dsrConnect(connect_delay=5.0, connect_spline_duration= 3.0)
+    time.sleep(5.0)
 
-    
-
-    print('Are you ready?')
-    for cnt in range(3):
-        print(3 - cnt, 'seconds before to start!!!')
+    print('Are you ready? Move the robot to the desired initial pose.')
+    for cnt in range(10):
+        print(10 - cnt, 'seconds before to start DATA COLLECTION!!!')
         time.sleep(1.0)
         if rospy.is_shutdown():
                 break
 
     #ready gripper thread
-    gripper_thread = threading.Thread(target=gripper.control_loop)
-    gripper_thread.daemon = True
-    gripper_thread.start()
 
-    print('Start!')
+
+    print('DATA COLLECTION Start!')
     time0 = time.time()
     for t in tqdm(range(max_timesteps)):
         t0 = time.time() #
-        dsr.step()
+        # dsr.step()
         tdsr = time.time() #
         # gripper.step()
         t1 = time.time() #
@@ -121,6 +129,12 @@ def main(args):
         dsr_state_euler = dsr.get_euler()
         gripper_action = gripper.get_action()
         gripper_state = gripper.get_state()
+
+        # print('dsr_action: ', dsr_action, dsr_action.shape)
+        # print('dsr_state_xpos: ', dsr_state_xpos, dsr_state_xpos.shape)
+        # print('dsr_state_euler: ', dsr_state_euler, dsr_state_euler.shape)
+        # print('gripper_action: ', gripper_action, gripper_action.shape)
+        # print('gripper_state: ', gripper_state, gripper_state.shape)
 
         data_dict['/observations/xpos'].append(dsr_state_xpos)
         data_dict['/observations/euler'].append(dsr_state_euler)
@@ -131,6 +145,8 @@ def main(args):
         for cam_name in camera_names:
             data_dict[f'/observations/images/{cam_name}'].append((image_recorder.get_images())[cam_name])
             # data_dict[f'/observations/depth_images/{cam_name}'].append((image_recorder.get_depth_images())[cam_name])
+            # print(f'{cam_name} size = {image_recorder.get_images()[cam_name].shape}')
+
         t2 = time.time() #
         actual_dt_history.append([t0, t1, t2])
 
@@ -141,21 +157,26 @@ def main(args):
             print("DSR commad duration is too long (over 100ms)")
 
         if rospy.is_shutdown():
+            dsr.stop()
+            gripper.open()
+            dsr.control_thread_stop()
+            gripper.control_thread_stop()
             break
         rate.sleep()
     
-    print(f'Avg Control Frequency [Hz]: {dsr.tick / (time.time() - time0)}')
-
+    print(f'Avg Control Frequency [Hz]: {max_timesteps / (time.time() - time0)}')
+    master_arms.dsrDisconnect()
+    # open gripper
+    gripper.open()
     # stop dsr
     dsr.stop()
-    # open gripper
-    # gripper.send_gripper_pos(0.0)
-    gripper.open()
-    time.sleep(0.1)
-    gripper.stop_control_loop = True
-    # shutdown controllers
-    # dsr.shutdown()
-    # gripper.shutdown()
+
+    time.sleep(0.5)
+
+    dsr.control_thread_stop()
+    gripper.control_thread_stop()
+    master_arms.thread_stop()
+
 
     COMPRESS = True
 
@@ -235,11 +256,11 @@ def main(args):
                                          chunks=(1, 360, 1280, 3), )
                 # _ = depth.create_dataset(cam_name, (max_timesteps, 360, 1280), dtype='uint8',
                 #                         chunks=(1, 360, 1280, 1), )
-        _ = obs.create_dataset('xpos', (max_timesteps, 3))
-        _ = obs.create_dataset('euler', (max_timesteps, 3))
-        _ = obs.create_dataset('gripper_pos', (max_timesteps, 1))
-        _ = actions.create_dataset('pose', (max_timesteps, 6))
-        _ = actions.create_dataset('gripper_pos', (max_timesteps, 1))
+        _ = obs.create_dataset('xpos', (max_timesteps, 3*num_robots))
+        _ = obs.create_dataset('euler', (max_timesteps, 3*num_robots))
+        _ = obs.create_dataset('gripper_pos', (max_timesteps, 1*num_robots))
+        _ = actions.create_dataset('pose', (max_timesteps, 6*num_robots))
+        _ = actions.create_dataset('gripper_pos', (max_timesteps, 1*num_robots))
 
         for name, array in data_dict.items():
             root[name][...] = array
@@ -264,7 +285,7 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task_name', action='store', type=str, help='Task name.', default='dsr_block_sort', required=False)
+    parser.add_argument('--task_name', action='store', type=str, help='Task name.', default='dsr_block_disassemble_and_sort', required=False)
     parser.add_argument('--episode_idx', action='store', type=int, help='Episode index.', default=None, required=False)
     main(vars(parser.parse_args())) # TODO
     # debug()

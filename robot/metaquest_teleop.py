@@ -9,7 +9,7 @@ import os
 import threading, time
 import sys
 # from sensor_msgs.msg import Joy
-from std_msgs.msg import Float32MultiArray, Float32
+from std_msgs.msg import Float32MultiArray, Float32, Bool
 from quest2ros.msg import OVR2ROSInputs, OVR2ROSHapticFeedback
 from geometry_msgs.msg import PoseStamped, Twist 
 import numpy as np
@@ -22,11 +22,6 @@ sys.dont_write_bytecode = True
 sys.path.append( os.path.abspath(os.path.join(os.path.dirname(__file__),"../../../../common/imp")) ) # get import path : DSR_ROBOT.py 
 
 
-# for single robot 
-try:
-    ROBOT_ID     = rospy.get_param('/dsr/robot_id')
-except:
-    ROBOT_ID     = "dsr_l"
 ROBOT_MODEL = "a0509"
 
 # import DR_init
@@ -34,14 +29,13 @@ ROBOT_MODEL = "a0509"
 # DR_init.__dsr__model = ROBOT_MODEL
 # from DSR_ROBOT import *
 
-class drlControl:
-    def __init__(self, robot_id = 'dsr_l', hz = 30, init_node=True, teleop=True):
+class dsrSingleArmControl:
+    def __init__(self, robot_id = 'dsr_l', hz = 30, teleop=True, master='gello'):
+        self.robot_id = robot_id
         self.hz = hz
         self.dt = 1/self.hz
         self.teleop = teleop
-
-        if init_node:
-            rospy.init_node('metaquest_teleop_py')
+        self.master = 'gello' # 'gello' or 'quest'
 
         rospy.on_shutdown(self.shutdown)
         ### publisher ###
@@ -50,12 +44,19 @@ class drlControl:
         self.pose_action_pub = rospy.Publisher('/'+robot_id +'/action/pose', PoseStamped, tcp_nodelay=True, queue_size=10)
         
         ### subscriber ###
-        self.ovr2ros_right_hand_pose_sub = rospy.Subscriber("/q2r_right_hand_pose",PoseStamped,self.ovr2ros_right_hand_pose_callback)
-        self.ovr2ros_right_hand_twist_sub = rospy.Subscriber("/q2r_right_hand_twist",Twist,self.ovr2ros_right_hand_twist_callback)
-        self.ovr2ros_right_hand_inputs_sub = rospy.Subscriber("/q2r_right_hand_inputs",OVR2ROSInputs,self.ovr2ros_right_hand_inputs_callback)
-        self.ovr2ros_left_hand_pose_sub = rospy.Subscriber("/q2r_left_hand_pose",PoseStamped,self.ovr2ros_left_hand_pose_callback)
-        self.ovr2ros_left_hand_twist_sub = rospy.Subscriber("/q2r_left_hand_twist",Twist,self.ovr2ros_left_hand_twist_callback)
-        self.ovr2ros_left_hand_inputs_sub = rospy.Subscriber("/q2r_left_hand_inputs",OVR2ROSInputs,self.ovr2ros_left_hand_inputs_callback)
+        if self.master == 'quest':
+            self.ovr2ros_right_hand_pose_sub = rospy.Subscriber("/q2r_right_hand_pose",PoseStamped,self.ovr2ros_right_hand_pose_callback)
+            self.ovr2ros_right_hand_twist_sub = rospy.Subscriber("/q2r_right_hand_twist",Twist,self.ovr2ros_right_hand_twist_callback)
+            self.ovr2ros_right_hand_inputs_sub = rospy.Subscriber("/q2r_right_hand_inputs",OVR2ROSInputs,self.ovr2ros_right_hand_inputs_callback)
+            self.ovr2ros_left_hand_pose_sub = rospy.Subscriber("/q2r_left_hand_pose",PoseStamped,self.ovr2ros_left_hand_pose_callback)
+            self.ovr2ros_left_hand_twist_sub = rospy.Subscriber("/q2r_left_hand_twist",Twist,self.ovr2ros_left_hand_twist_callback)
+            self.ovr2ros_left_hand_inputs_sub = rospy.Subscriber("/q2r_left_hand_inputs",OVR2ROSInputs,self.ovr2ros_left_hand_inputs_callback)
+        elif self.master == 'gello':
+            self.gello_hand_pose_sub = rospy.Subscriber(f'/{robot_id}/teleop/gello_hand_pose',PoseStamped,self.gello_hand_pose_callback)
+            self.gello_connection_sub = rospy.Subscriber(f'/{robot_id}/teleop/gello_connection',Bool,self.gello_connection_callback)
+            self.gello_homepose_sub = rospy.Subscriber(f'/{robot_id}/teleop/gello_home_pose',Bool,self.gello_homepose_callback)
+        else:
+            raise NotImplementedError
 
         ### initialize variables ###
         # self.r = CDsrRobot(ROBOT_ID, ROBOT_MODEL)
@@ -140,13 +141,17 @@ class drlControl:
         self.dsr_desired_x_vel_pre = [0, 0, 0, 0, 0, 0]
         self.dsr_desired_x_vel_lpf = [0, 0, 0, 0, 0, 0]
 
-        self.dsr_desired_ready_pose_j = [-90.0, 0, -90.0, 0, -90.0, 0]
         self.dsr_desired_zero_pose_j = [0, 0, 0, 0, 0, 0]
 
         self.control_mode = 0 # 1: teleoperation, 2: ready position, 3: zero position, 0: stop robot
         self.tick = 0
 
-        self.drl_tcp_client = TcpClient()
+        if self.robot_id == 'dsr_l':
+            self.drl_tcp_client = TcpClient(tcp_ip="192.168.0.77", tcp_port=777)
+        elif self.robot_id == 'dsr_r':
+            self.drl_tcp_client = TcpClient(tcp_ip="192.168.0.80", tcp_port=780)
+        else:
+            raise NotImplementedError
 
         rospy.set_param('/use_sim_time', False)
         time.sleep(1)
@@ -160,10 +165,13 @@ class drlControl:
             print('waiting robot data read from DSL tcp server...')
         
         self.dsr_desired_x_pose_lpf[:] = self.drl_tcp_client.current_posx[:]
+
+        self.stop_control_loop = False
         
 
     def shutdown(self):
-        print("\n DSR CONTROL SHUTDOWN! \n")
+        print(f"\n DSR({self.robot_id}) CONTROL SHUTDOWN! \n")
+        self.stop_control_loop = True
         self.drl_tcp_client.shutdown()
         return 0
 
@@ -225,6 +233,15 @@ class drlControl:
     def ovr2ros_left_hand_inputs_callback(self, data):    
         self.left_hand_inputs_raw = data
 
+    def gello_hand_pose_callback(self, data): 
+        self.right_hand_pose_raw = data
+    
+    def gello_connection_callback(self, data): 
+        self.right_hand_inputs_raw.button_lower = data.data
+
+    def gello_homepose_callback(self, data): 
+        self.right_hand_inputs_raw.button_upper = data.data
+
     def readControllerInputs(self):
         self.right_hand_pose = self.right_hand_pose_raw
         self.right_hand_twist = self.right_hand_twist_raw
@@ -250,15 +267,15 @@ class drlControl:
 
         if self.right_button_lower_pre == False and self.right_hand_inputs.button_lower == True:
             self.right_botton_lower_clicked = True
-            # print("right button A is clicked!")
+            print("right button A is clicked!")
 
         if self.right_button_lower_pre == True and self.right_hand_inputs.button_lower == False:
             self.right_botton_lower_released = True
-            # print("right button A is released!")
+            print("right button A is released!")
 
         if self.right_button_upper_pre == False and self.right_hand_inputs.button_upper == True:
             self.right_botton_upper_clicked = True
-            # print("right button B is clicked!")
+            print("right button B is clicked!")
 
 
         if self.left_button_lower_pre == False and self.left_hand_inputs.button_lower == True:
@@ -317,8 +334,8 @@ class drlControl:
             self.position_motion_gain = 1.0
             self.lpf_cutoff_hz = 3
             
-            self.max_lin_vel = 200
-            self.max_ang_vel = 100
+            # self.max_lin_vel = 200
+            # self.max_ang_vel = 100
 
             # print("Robot is connected with controller", self.start_controller_pos)
 
@@ -336,9 +353,12 @@ class drlControl:
 
             ############################## linear velocity ##################################
             for i in range(3):
-                self.dsr_desired_x_pose[i] = self.start_dsr_pos[i] + self.position_motion_gain*(self.current_controller_pos[i] - self.start_controller_pos[i])*1000 # multiply 1000 for [m] to [mm]
-                # self.dsr_desired_x_pose[i] = self.position_motion_gain*(self.current_controller_pos[i] - self.start_controller_pos[i])*1000 # multiply 1000 for [m] to [mm]
-                # self.dsr_desired_x_pose_lpf[i] = self.lpf_alpha*self.dsr_desired_x_pose_lpf[i] + (1-self.lpf_alpha)*self.dsr_desired_x_pose[i]
+                if self.master == 'quest':
+                    #### META QUEST ####
+                    self.dsr_desired_x_pose[i] = self.start_dsr_pos[i] + self.position_motion_gain*(self.current_controller_pos[i] - self.start_controller_pos[i])*1000 # multiply 1000 for [m] to [mm]
+                elif self.master == 'gello':
+                    #### GELLO ####
+                    self.dsr_desired_x_pose[i] = self.position_motion_gain*(self.current_controller_pos[i])*1000 # multiply 1000 for [m] to [mm]
                 
             ## linear velocity clipping
             # d_x_pose = np.array(self.dsr_desired_x_pose[0:3]) - np.array(self.dsr_desired_x_pose_pre[0:3])
@@ -348,39 +368,31 @@ class drlControl:
             #     for i in range(3):
             #         self.dsr_desired_x_pose[i] = self.dsr_desired_x_pose_pre[i] + (d_x_pose[i])/d_x_pose_norm*self.max_lin_vel
 
-            
-            # k_v = 2.3
             for i in range(3):
                 self.dsr_desired_x_pose_lpf[i] = self.lpf(self.dsr_desired_x_pose[i], self.dsr_desired_x_pose_lpf[i], self.lpf_cutoff_hz)
-                # self.dsr_desired_x_vel[i] = np.clip(k_v*(self.dsr_desired_x_pose_lpf[i] - self.current_dsr_pos[i]), -300, 300) # dim: [mm/s]
-
 
             #################################################################################
 
             ############################## agnular velocity ##################################
-            controller_del_rot = Rotation.from_matrix( np.dot(self.current_controller_rotm, np.transpose(self.start_controller_rotm)) )
-            self.controller_delta_rotvec = controller_del_rot.as_rotvec(degrees=True)
-            
-            
-            for i in range(3):
-                self.controller_delta_rotvec_lpf[i] = self.lpf(self.controller_delta_rotvec[i], self.controller_delta_rotvec_lpf[i], self.lpf_cutoff_hz) 
-                       
-
-            # R_des = r_delta_controller_lpf.as_matrix() # orientation lpf version
-            r_delta_controller_lpf = Rotation.from_rotvec(self.controller_delta_rotvec_lpf, degrees = True)
-            self.dsr_desired_rotm = np.dot( r_delta_controller_lpf.as_matrix(), self.start_dsr_rotm) # orientation lpf version
-            r_des = Rotation.from_matrix(self.dsr_desired_rotm)
-            self.dsr_desired_x_pose_lpf[3:6] = r_des.as_euler("ZYZ", degrees=True)
-
-            # delta_rotation = Rotation.from_matrix( np.dot(self.dsr_desired_rotm, np.transpose(self.current_dsr_rotm)) )
-            # k_w = 2.5
-            # for i in range(3):
-            #     self.dsr_desired_x_vel[i+3] = np.clip(k_w*delta_rotation.as_rotvec(degrees = True)[i], -90.0, 90.0) # dim:[deg/s]
+            if self.master == 'quest':
+                #### META QUEST ####
+                controller_del_rot = Rotation.from_matrix( np.dot(self.current_controller_rotm, np.transpose(self.start_controller_rotm)) )
+                self.controller_delta_rotvec = controller_del_rot.as_rotvec(degrees=True)
+                
+                for i in range(3):
+                    self.controller_delta_rotvec_lpf[i] = self.lpf(self.controller_delta_rotvec[i], self.controller_delta_rotvec_lpf[i], self.lpf_cutoff_hz) 
+                        
+                # R_des = r_delta_controller_lpf.as_matrix() # orientation lpf version
+                r_delta_controller_lpf = Rotation.from_rotvec(self.controller_delta_rotvec_lpf, degrees = True)
+                self.dsr_desired_rotm = np.dot( r_delta_controller_lpf.as_matrix(), self.start_dsr_rotm) # orientation lpf version
+            elif self.master == 'gello':
+                #### GELLO ####
+                self.dsr_desired_rotm = self.current_controller_rotm
+                r_des = Rotation.from_matrix(self.dsr_desired_rotm)
+                self.dsr_desired_x_pose_lpf[3:6] = r_des.as_euler("ZYZ", degrees=True)
 
             self.quat_des = r_des.as_quat()
-
             #################################################################################
-            
 
         elif self.right_botton_upper_clicked:
             self.control_mode = 2
@@ -423,8 +435,6 @@ class drlControl:
         return target_vel
 
     def rosMsgPublish(self):
-        
-
         self.right_arm_pose_action_msg.pose.position.x = self.dsr_desired_x_pose_lpf[0]
         self.right_arm_pose_action_msg.pose.position.y = self.dsr_desired_x_pose_lpf[1]
         self.right_arm_pose_action_msg.pose.position.z = self.dsr_desired_x_pose_lpf[2]
@@ -457,16 +467,16 @@ class drlControl:
         
         while not rospy.is_shutdown():
             self.drl_tcp_client.read_data()
-
             for i in range(3):
                 self.current_dsr_pos[i] = self.drl_tcp_client.current_posx[i]
                 self.current_dsr_euler[i] = self.drl_tcp_client.current_posx[i+3]
             self.current_dsr_rotm = self.drl_tcp_client.current_dsr_rotm.copy()
 
             self.dsr_desired_x_vel = self.calculateTragetVelocity(self.dsr_desired_x_pose_lpf)
-
+            # print('self.dsr_desired_x_vel: ', self.dsr_desired_x_vel)
             self.drl_tcp_client.send_command(self.control_mode, self.dsr_desired_x_vel)
-            if self.control_mode > 1:
+
+            if self.control_mode >= 2: # send preset motion mode only once
                 self.control_mode = 0
 
     def step(self):
@@ -478,8 +488,6 @@ class drlControl:
         # read robot data
         self.readRobotData()
 
-        
-
         # if self.tick % self.hz == 0:
         #     print("teleop.current_dsr_pos: ", self.current_dsr_pos[0:3])
         #     print("teleop.dsr_desired_x_pos_lpf: ", self.dsr_desired_x_pose_lpf[0:3])
@@ -487,22 +495,33 @@ class drlControl:
         if self.teleop:
             self.readControllerInputs()
             self.calculateTragetPose()
-
         t2 = rospy.Time.now()
         # self.drl_tcp_client.send_command(self.control_mode, self.dsr_desired_x_vel) # inverse trigger command
 
         self.rosMsgPublish()
         # save current values to the previous values
         self.savePrevData()
-        self.tick +=1
+        self.tick += 1
         t3 = rospy.Time.now()
         # print("t2-t1: ", (t2-t1))
         # print("t3-t2: ", (t3-t2))
         # print("t3-t1: ", (t3-t1))
         # time.sleep(0.1)
 
+    def control_loop(self):
+        print(f'DSR ({self.robot_id}) CONTROL START')
+        rate = rospy.Rate(self.hz)
+        # rate = rospy.Rate(20)
+        
+        while not rospy.is_shutdown():
+            if self.stop_control_loop:
+                break
+            self.step()
+            rate.sleep()
+        print('good bye!')
+
     def stop(self):
-        print("stop dsr robot")
+        print(f"stop dsr({self.robot_id}) robot")
         self.control_mode = 0
         self.dsr_desired_x_pose_lpf[0:3] = self.current_dsr_pos[:]
         self.dsr_desired_x_pose_lpf[3:6] = self.current_dsr_euler[:]
@@ -525,25 +544,16 @@ class drlControl:
             self.dsr_desired_x_pose_lpf[i] = target_pose[i]
     
 class TcpClient:
-    def __init__(self, tcp_ip="192.168.0.77", tcp_port=777):
-        if tcp_ip != "192.168.0.77":
-            self.loginfo("Using 'tcp_ip' override from constructor: {}".format(tcp_ip))
-            tcp_ip = tcp_ip
-        
-        if tcp_port != 777:
-            self.loginfo("Using 'tcp_port' override from constructor: {}".format(tcp_port))
-            tcp_port = tcp_port
-        
+    def __init__(self, tcp_ip="192.168.0.77", tcp_port=777):        
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # self.client_socket.settimeout(3)
         result = 1
         while result and (not rospy.is_shutdown()):
             result = self.client_socket.connect_ex((tcp_ip, tcp_port))
             print('Waiting for DSL server...(', result,')')
+            if result == 0:
+                print(f'TCP Client is connected! ({tcp_ip}, {tcp_port})')
             rospy.sleep(1.0)
-        # except:
-        #     # self.logerr("client_socket.TcpServer: socket timeout")
-        #     print('TCP Client Connection is failed')
+
         
         self.calculator = Calculator(Crc16.MODBUS, optimized=True)
         self.current_posx = [0,0,0,0,0,0]
@@ -586,18 +596,82 @@ class TcpClient:
             print('get first robot data: ', self.current_posx)
     
     def shutdown(self):
-        self.client_socket.close()
+        print('TcpClient is shutdown')
+    #     self.client_socket.close()
         
 
-if __name__ == "__main__":
-    drlcontrol = drlControl(ROBOT_ID, 30, init_node=True)
+class drlControl:
+    def __init__(self, robot_id_list = ['dsr_l'], hz = 30, init_node=True, teleop=True):
+        
+        if init_node:
+            rospy.init_node('dsr_teleop_control_py')
 
-    rate = rospy.Rate(drlcontrol.hz)
-    # rate = rospy.Rate(20)
+        self.hz = hz
+        self.teleop = teleop
+        self.robot_id_list = robot_id_list
+        self.num_robots = len(self.robot_id_list)
+
+        self.dsr_list = []
+        self.dsr_thread_list = []
+        for idx, robot_id in enumerate(self.robot_id_list):
+            print('idx: ', idx, robot_id)
+            self.dsr_list.append(dsrSingleArmControl(robot_id = robot_id, hz = self.hz, teleop=self.teleop))
+            self.dsr_thread_list.append(threading.Thread(target=self.dsr_list[idx].control_loop))
+
+    def control_thread_start(self):
+        for idx in range(self.num_robots):
+            self.dsr_thread_list[idx].start()
     
-    print("DSR CONTROL START")
-    while not rospy.is_shutdown():
-        drlcontrol.step()
-        rate.sleep()
+    def control_thread_stop(self):
+        for idx in range(self.num_robots):
+            self.dsr_list[idx].stop_control_loop = True
 
-    print('good bye!')
+    def stop(self):
+        for idx in range(self.num_robots):
+            self.dsr_list[idx].control_mode = 0
+
+            self.dsr_list[idx].dsr_desired_x_pose_lpf[0:3] = self.dsr_list[idx].current_dsr_pos[:]
+            self.dsr_list[idx].dsr_desired_x_pose_lpf[3:6] = self.dsr_list[idx].current_dsr_euler[:]
+
+            self.dsr_list[idx].dsr_desired_x_vel = [0, 0, 0, 0, 0, 0]
+            self.dsr_list[idx].drl_tcp_client.send_command(self.dsr_list[idx].control_mode, self.dsr_list[idx].dsr_desired_x_vel)
+
+    def get_xpos(self):
+        current_dsr_pos = np.zeros(0)
+        for idx in range(len(self.robot_id_list)):
+            current_dsr_pos = np.concatenate( (current_dsr_pos, self.dsr_list[idx].current_dsr_pos) )
+        return current_dsr_pos
+    
+    def get_euler(self):
+        current_dsr_euler = np.zeros(0)
+        for idx in range(len(self.robot_id_list)):
+            current_dsr_euler = np.concatenate( (current_dsr_euler, self.dsr_list[idx].current_dsr_euler) )
+        return current_dsr_euler
+
+    def get_action(self):
+        dsr_actions = np.zeros(0)
+        for idx in range(len(self.robot_id_list)):
+            dsr_desired_x_pose_temp = np.array(self.dsr_list[idx].dsr_desired_x_pose_lpf)
+            dsr_actions = np.concatenate( (dsr_actions, dsr_desired_x_pose_temp) )
+        return dsr_actions
+
+    def set_action(self, target_pose):
+        for idx in range(len(self.robot_id_list)):
+            self.dsr_list[idx].control_mode = 1
+            for i in range(6):
+                self.dsr_list[idx].dsr_desired_x_pose_lpf[i] = target_pose[6*idx+i]
+
+if __name__ == "__main__":
+    # rospy.init_node('metaquest_teleop_py')
+    # dsr_l = dsrSingleArmControl(robot_id = 'dsr_l', hz = 30, teleop=True)
+
+    # dsr_l_thread = threading.Thread(target=dsr_l.control_loop)
+    # dsr_l_thread.daemon = True
+    # dsr_l_thread.start()
+
+    # dsr_l.control_loop()
+
+    # drlcontrol = drlControl(robot_id_list=['dsr_l', 'dsr_r'], hz = 20, init_node=True, teleop= True)
+    drlcontrol = drlControl(robot_id_list=['dsr_r'], hz = 20, init_node=True, teleop= True)
+    drlcontrol.control_thread_start()
+    

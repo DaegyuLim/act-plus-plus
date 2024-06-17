@@ -2,14 +2,14 @@ import numpy as np
 import time
 
 class ImageRecorder:
-    def __init__(self, init_node=False, is_debug=False):
+    def __init__(self, camera_names, init_node=False, is_debug=False):
         import rospy
         from collections import deque
         from cv_bridge import CvBridge
         from sensor_msgs.msg import Image
         self.is_debug = is_debug
         self.bridge = CvBridge()
-        self.camera_names = ['lhand_camera', 'head_camera'] #['cam_high', 'cam_low', 'cam_left_wrist', 'cam_right_wrist']
+        self.camera_names = camera_names #['cam_high', 'cam_low', 'cam_left_wrist', 'cam_right_wrist']
         if init_node:
             rospy.init_node('image_recorder', anonymous=True)
         for cam_name in self.camera_names:

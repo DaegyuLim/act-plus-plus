@@ -251,6 +251,7 @@ class ACTPolicy(nn.Module):
         return self.state_dict()
 
     def deserialize(self, model_dict):
+        # print("model_dict: ", model_dict)
         return self.load_state_dict(model_dict)
 
 
