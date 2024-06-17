@@ -40,8 +40,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
         self.use_depth = use_depth
     
-        self.reletive_action_mode = False
-        self.reletive_obs_mode = False
+        self.reletive_action_mode = True
+        self.reletive_obs_mode = True
         self.__getitem__(0) # initialize self.is_sim and self.transformations
         self.is_sim = False
         
@@ -138,19 +138,19 @@ class EpisodicDataset(torch.utils.data.Dataset):
             padded_action[:action_len] = action
             is_pad = np.zeros(self.max_episode_len, dtype=np.bool_)
             is_pad[action_len:] = 1
-
+            
             padded_action = padded_action[:self.chunk_size]
             is_pad = is_pad[:self.chunk_size]
 
             padded_robot_state = np.zeros((self.max_episode_len, original_robot_shape[1]), dtype=np.float32)
-            padded_robot_state[:] = robot_state[0]
-            padded_robot_state[-robot_state_len:] = robot_state
+            padded_robot_state[:] = robot_state[0] # padding with the first state
+            padded_robot_state[-robot_state_len:] = robot_state 
             
             if self.reletive_obs_mode == False:
                 padded_robot_state = padded_robot_state[-self.robot_obs_size:]
             else:
                 padded_robot_state = padded_robot_state[-(self.robot_obs_size+1):]
-            padded_robot_state = padded_robot_state[::-1] # padded_robot_state[0] is the current observation at start_ts
+            padded_robot_state = padded_robot_state[::-1] # reverse the order of list; padded_robot_state[0] is the current state
             
             t5 = time()
             # print('padded_robot_state: ', padded_robot_state[0, 0:6])
@@ -167,8 +167,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     action_rotm = reference_state_rotation.as_matrix().transpose() * action_rotation.as_matrix()
                     rel_action_rotation = Rotation.from_matrix(action_rotm)
                     padded_action[t, 3:6] = rel_action_rotation.as_rotvec()
+
                     # position
-                    padded_action[t, 0:3] = (reference_state_rotation.as_matrix().transpose()).dot(padded_action[t, 0:3] - reference_state_pos)
+                    padded_action[t, 0:3] = (reference_state_rotation.as_matrix().transpose()).dot( padded_action[t, 0:3] - reference_state_pos )
                     # print('padded_action: ', t, ', ', padded_action[t, 0:3], ', ', padded_action[t, 3:6])
                     # print( (reference_state_rotation.as_matrix()))
                     # print( (reference_state_rotation.as_matrix().transpose()))
@@ -187,7 +188,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     padded_robot_state[t+1, 0:3] = (reference_state_rotation.as_matrix().transpose()).dot(padded_robot_state[t+1, 0:3] - reference_state_pos)
                     padded_robot_state[:-1, 0:6] = padded_robot_state[1:, 0:6] # pop relative current state which is always be identity
                 
-                padded_robot_state = padded_robot_state[:self.robot_obs_size] 
+                assert len(padded_robot_state) == self.robot_obs_size+1
+                padded_robot_state = padded_robot_state[:self.robot_obs_size] #discard the last trash data
 
             t6 = time()
             # new axis for different cameras
