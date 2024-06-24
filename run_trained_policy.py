@@ -120,6 +120,7 @@ def main(args):
         '/actions/pose': [],
         '/actions/gripper_pos': []
     }
+    
     for cam_name in camera_names:
         data_dict[f'/observations/images/{cam_name}'] = []
         data_dict[f'/observations/depth_images/{cam_name}'] = []

@@ -71,8 +71,8 @@ def main(args):
     name_filter = task_config.get('name_filter', lambda n: True)
 
     # fixed parameters
-    state_dim = 7
-    action_dim = 7
+    state_dim = 20
+    action_dim = 20
     lr_backbone = 1e-5
     backbone = 'resnet18'
     if policy_class == 'ACT':
@@ -157,7 +157,7 @@ def main(args):
     config_path = os.path.join(ckpt_dir, 'config.pkl')
     expr_name = ckpt_dir.split('/')[-1]
     if is_wandb and not is_eval:
-        wandb.init(project="robros_dsr_block_sort_ablation", reinit=True, entity="daegyulim", name=expr_name)
+        wandb.init(project="dsr_block_dnq", reinit=True, entity="daegyulim", name=expr_name)
         wandb.config.update(config)
     with open(config_path, 'wb') as f:
         pickle.dump(config, f)
@@ -664,7 +664,7 @@ if __name__ == '__main__':
     parser.add_argument('--wandb', action='store_true')
     parser.add_argument('--ckpt_dir', action='store', type=str, default='/home/robros-ai/dg/robros_imitation_learning/ckpt/dsr_block_sort', help='ckpt_dir', required=True)
     parser.add_argument('--policy_class', action='store', type=str, default='ACT', help='policy_class, capitalize', required=True)
-    parser.add_argument('--task_name', action='store', type=str, default='dsr_block_collect', help='task_name', required=True)
+    parser.add_argument('--task_name', action='store', type=str, default='dsr_block_disassemble_and_sort', help='task_name', required=True)
     parser.add_argument('--batch_size', action='store', type=int, default=16, help='batch_size', required=True)
     parser.add_argument('--seed', action='store', type=int, default=0, help='seed', required=True)
     parser.add_argument('--num_steps', action='store', type=int, default=100000, help='num_steps', required=True)

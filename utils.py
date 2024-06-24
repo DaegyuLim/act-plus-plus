@@ -40,8 +40,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
         self.use_depth = use_depth
     
-        self.reletive_action_mode = True
-        self.reletive_obs_mode = True
+        self.reletive_action_mode = False
+        self.reletive_obs_mode = False
+
         self.__getitem__(0) # initialize self.is_sim and self.transformations
         self.is_sim = False
         
@@ -68,12 +69,28 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     is_sim = False
 
                 compressed = root.attrs.get('compress', False)
+
+                num_robots = int(root['/actions/pose'].shape[1]/6)
+
+                action_xpos = np.zeros( (root['/actions/gripper_pos'].shape[0], 0) )
+                action_euler = np.zeros( (root['/actions/gripper_pos'].shape[0], 0) )
+                action_rotm6d = np.zeros( (root['/actions/gripper_pos'].shape[0], 0) )
+                action_gripper = root['/actions/gripper_pos'][()]                
+
+                for r in range(num_robots):
+                    action_xpos = np.concatenate( (action_xpos, root['/actions/pose'][:, 6*r:6*r+3]), axis = -1)
+                    action_euler = np.concatenate( (action_euler, root['/actions/pose'][:, 6*r+3:6*r+6]), axis = -1)
+                    action_rotation = Rotation.from_euler("ZYZ", root['/actions/pose'][:, 6*r+3:6*r+6], degrees=True)
+                    action_rotm = action_rotation.as_matrix()
+                    action_rotm6d =  np.concatenate( (action_rotm6d, action_rotm[:, :, 0], action_rotm[:, :, 1]), axis = -1)
+
+
                 if '/base_action' in root:
                     base_action = root['/base_action'][()]
                     base_action = preprocess_base_action(base_action)
-                    action = np.concatenate([ root['/actions/pose'][()], root['/actions/gripper_pos'][()], base_action ], axis=-1)
+                    action = np.concatenate([ action_xpos, action_rotm6d, action_gripper, base_action ], axis=-1)
                 else:  
-                    action = np.concatenate([ root['/actions/pose'][()], root['/actions/gripper_pos'][()] ], axis=-1)
+                    action = np.concatenate([ action_xpos, action_rotm6d, action_gripper ], axis=-1)
                     # dummy_base_action = np.zeros([action.shape[0], 2])
                     # action = np.concatenate([action, dummy_base_action], axis=-1)
 
@@ -83,10 +100,18 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 # get observation at start_ts only
                 xpos = root['/observations/xpos'][()]
                 euler = root['/observations/euler'][()]
+                
+                rotm6d = np.zeros((euler.shape[0], 0))
+                for r in range(num_robots):
+                    rotation = Rotation.from_euler("ZYZ", euler[:, 3*r:3*r+3], degrees=True)
+                    rotm = rotation.as_matrix()
+                    rotm6d = np.concatenate( (rotm6d, rotm[:, :, 0], rotm[:, :, 1]), axis = -1)
+
                 gripper_pos = root['/observations/gripper_pos'][()]
                 t1 = time()
                 
-                robot_state = np.concatenate( [xpos, euler, gripper_pos], axis=-1)
+                robot_state = np.concatenate( [xpos, rotm6d, gripper_pos], axis=-1)
+                
                 original_robot_shape = robot_state.shape
                 t2 = time()
                 # print('robot_state shape', original_robot_shape) # (2000, 7)
@@ -138,9 +163,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
             padded_action[:action_len] = action
             is_pad = np.zeros(self.max_episode_len, dtype=np.bool_)
             is_pad[action_len:] = 1
-            
             padded_action = padded_action[:self.chunk_size]
             is_pad = is_pad[:self.chunk_size]
+
 
             padded_robot_state = np.zeros((self.max_episode_len, original_robot_shape[1]), dtype=np.float32)
             padded_robot_state[:] = robot_state[0] # padding with the first state
@@ -151,7 +176,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
             else:
                 padded_robot_state = padded_robot_state[-(self.robot_obs_size+1):]
             padded_robot_state = padded_robot_state[::-1] # reverse the order of list; padded_robot_state[0] is the current state
-            
+
             t5 = time()
             # print('padded_robot_state: ', padded_robot_state[0, 0:6])
             # print('padded_action pre: ', padded_action[:10, 0:6])
@@ -291,7 +316,6 @@ class EpisodicDataset(torch.utils.data.Dataset):
             else:
                 # normalize to mean 0 std 1
                 action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats["action_std"]
-
             # print('self.norm_stats["action_mean"]: ', self.norm_stats["action_mean"])
             # print('self.norm_stats["action_std"]: ', self.norm_stats["action_std"])
             # print('self.norm_stats["state_mean"]: ', self.norm_stats["state_mean"])
@@ -300,7 +324,6 @@ class EpisodicDataset(torch.utils.data.Dataset):
             # print('action_data.shape: ', action_data.shape)
 
             robot_state_data = (robot_state_data - self.norm_stats["state_mean"]) / self.norm_stats["state_std"]
-
         except:
             print(f'Error loading {dataset_path} in __getitem__')
             quit()
@@ -326,19 +349,51 @@ def get_norm_stats(dataset_path_list):
     for dataset_path in dataset_path_list:
         try:
             with h5py.File(dataset_path, 'r') as root:
-                xpos = root['/observations/xpos'][()]
-                euler = root['/observations/euler'][()]
-                gripper_pos = root['/observations/gripper_pos'][()]
-                state = np.concatenate([xpos, euler, gripper_pos], axis=-1)
-                # qpos = root['/observations/qpos'][()]
-                # qvel = root['/observations/qvel'][()]
+                num_robots = int(root['/actions/pose'].shape[1]/6)
+
+                action_xpos = np.zeros( (root['/actions/gripper_pos'].shape[0], 0) )
+                action_euler = np.zeros( (root['/actions/gripper_pos'].shape[0], 0) )
+                action_rotm6d = np.zeros( (root['/actions/gripper_pos'].shape[0], 0) )
+                action_gripper = root['/actions/gripper_pos'][()]                
+
+                for r in range(num_robots):
+                    action_xpos = np.concatenate( (action_xpos, root['/actions/pose'][:, 6*r:6*r+3]), axis = -1)
+                    action_euler = np.concatenate( (action_euler, root['/actions/pose'][:, 6*r+3:6*r+6]), axis = -1)
+                    action_rotation = Rotation.from_euler("ZYZ", root['/actions/pose'][:, 6*r+3:6*r+6], degrees=True)
+                    action_rotm = action_rotation.as_matrix()
+                    action_rotm6d =  np.concatenate( (action_rotm6d, action_rotm[:, :, 0], action_rotm[:, :, 1]), axis = -1)
+
+
                 if '/base_action' in root:
                     base_action = root['/base_action'][()]
                     base_action = preprocess_base_action(base_action)
-                    action = np.concatenate([ root['/actions/pose'][()], root['/actions/gripper_pos'][()], base_action ], axis=-1)
-                else:
-                    action = np.concatenate([ root['/actions/pose'][()], root['/actions/gripper_pos'][()] ], axis=-1)
-                    # dummy_base_action = np.zeros([action.shape[0], 2])
+                    action = np.concatenate([ action_xpos, action_rotm6d, action_gripper, base_action ], axis=-1)
+                else:  
+                    action = np.concatenate([ action_xpos, action_rotm6d, action_gripper ], axis=-1)
+
+                xpos = root['/observations/xpos'][()]
+                euler = root['/observations/euler'][()]
+                rotm6d = np.zeros((euler.shape[0], 0))
+                for r in range(num_robots):
+                    rotation = Rotation.from_euler("ZYZ", euler[:, 3*r:3*r+3], degrees=True)
+                    rotm = rotation.as_matrix()
+                    rotm6d = np.concatenate( (rotm6d, rotm[:, :, 0], rotm[:, :, 1]), axis = -1)
+                    
+                gripper_pos = root['/observations/gripper_pos'][()]
+                t1 = time()
+                
+                state = np.concatenate( [xpos, rotm6d, gripper_pos], axis=-1)
+
+
+                # qpos = root['/observations/qpos'][()]
+                # qvel = root['/observations/qvel'][()]
+                # if '/base_action' in root:
+                #     base_action = root['/base_action'][()]
+                #     base_action = preprocess_base_action(base_action)
+                #     action = np.concatenate([ root['/actions/pose'][()], root['/actions/gripper_pos'][()], base_action ], axis=-1)
+                # else:
+                #     action = np.concatenate([ root['/actions/pose'][()], root['/actions/gripper_pos'][()] ], axis=-1)
+                #     # dummy_base_action = np.zeros([action.shape[0], 2])
                     # action = np.concatenate([action, dummy_base_action], axis=-1)
         except Exception as e:
             print(f'Error loading {dataset_path} in get_norm_stats')
@@ -367,6 +422,11 @@ def get_norm_stats(dataset_path_list):
     stats = {"action_mean": action_mean.numpy(), "action_std": action_std.numpy(),
              "action_min": action_min.numpy() - eps,"action_max": action_max.numpy() + eps,
              "state_mean": state_mean.numpy(), "state_std": state_std.numpy()}
+
+    print(f'action_mean = {action_mean}')
+    print(f'action_std = {action_std}')
+    print(f'state_mean = {state_mean}')
+    print(f'state_std = {state_std}')
 
     return stats, all_episode_len
 
@@ -438,7 +498,7 @@ def load_data(dataset_dir_l, name_filter, camera_names, batch_size_train, batch_
     train_dataset = EpisodicDataset(dataset_path_list, camera_names, norm_stats, train_episode_ids, train_episode_len, chunk_size, robot_obs_size, img_obs_size, img_obs_skip, policy_class, use_depth)
     val_dataset = EpisodicDataset(dataset_path_list, camera_names, norm_stats, val_episode_ids, val_episode_len, chunk_size, robot_obs_size, img_obs_size, img_obs_skip, policy_class, use_depth)
     train_num_workers = (16 if os.getlogin() == 'robrosdg' else 8)
-    val_num_workers = 4
+    val_num_workers = (16 if os.getlogin() == 'robrosdg' else 8)
     print(f'Augment images: {train_dataset.augment_images}, train_num_workers: {train_num_workers}, val_num_workers: {val_num_workers}')
     train_dataloader = DataLoader(train_dataset, batch_sampler=batch_sampler_train, pin_memory=True, num_workers=train_num_workers, prefetch_factor=2)
     val_dataloader = DataLoader(val_dataset, batch_sampler=batch_sampler_val, pin_memory=True, num_workers=val_num_workers, prefetch_factor=2)
