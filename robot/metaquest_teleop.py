@@ -471,6 +471,7 @@ class dsrSingleArmControl:
                 self.current_dsr_pos[i] = self.drl_tcp_client.current_posx[i]
                 self.current_dsr_euler[i] = self.drl_tcp_client.current_posx[i+3]
             self.current_dsr_rotm = self.drl_tcp_client.current_dsr_rotm.copy()
+            self.current_dsr_rotvec = self.drl_tcp_client.current_dsr_rotvec.copy()
 
             self.dsr_desired_x_vel = self.calculateTragetVelocity(self.dsr_desired_x_pose_lpf)
             # print('self.dsr_desired_x_vel: ', self.dsr_desired_x_vel)
@@ -497,6 +498,12 @@ class dsrSingleArmControl:
             self.calculateTragetPose()
         t2 = rospy.Time.now()
         # self.drl_tcp_client.send_command(self.control_mode, self.dsr_desired_x_vel) # inverse trigger command
+        # print(f'get_xpos: {self.get_xpos()}')
+        # print(f'get_euler: {self.get_euler()}')
+        # print(f'rotvec: {self.current_dsr_rotvec}')
+        # print(f'get_action: {self.get_action()}')
+        
+        
 
         self.rosMsgPublish()
         # save current values to the previous values
@@ -558,6 +565,7 @@ class TcpClient:
         self.calculator = Calculator(Crc16.MODBUS, optimized=True)
         self.current_posx = [0,0,0,0,0,0]
         self.current_dsr_rotm = np.eye(3)
+        self.current_dsr_rotvec = np.zeros(3)
         self.first_data_get = False
 
     def send_command(self, control_mode, desired_hand_vel):    
@@ -589,6 +597,7 @@ class TcpClient:
 
         r_current_ori = Rotation.from_euler("ZYZ", self.current_posx[3:6], degrees=True)
         self.current_dsr_rotm = r_current_ori.as_matrix()
+        self.current_dsr_rotvec = r_current_ori.as_rotvec()
         # t2 = rospy.Time.now()
         # print("t2-t1: ", (t2-t1)) # 90~150 ms
         if self.first_data_get == False:
@@ -671,7 +680,7 @@ if __name__ == "__main__":
 
     # dsr_l.control_loop()
 
-    # drlcontrol = drlControl(robot_id_list=['dsr_l', 'dsr_r'], hz = 20, init_node=True, teleop= True)
-    drlcontrol = drlControl(robot_id_list=['dsr_r'], hz = 20, init_node=True, teleop= True)
+    drlcontrol = drlControl(robot_id_list=['dsr_l', 'dsr_r'], hz = 20, init_node=True, teleop= True)
+    # drlcontrol = drlControl(robot_id_list=['dsr_r'], hz = 20, init_node=True, teleop= True)
     drlcontrol.control_thread_start()
     
