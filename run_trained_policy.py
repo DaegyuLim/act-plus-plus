@@ -56,8 +56,9 @@ def main(args):
     reletive_obs_mode = False
     reletive_action_mode = False
     trained_on_gpu_server = False
-    esb_k = 0.01
+    esb_k = 0.03
     
+    num_robots = len(robot_id_list)
 
     dataset_name = 'real_robot_evaluation'
     print(args['task_name'] + ', ' + dataset_name + '\n' )
@@ -67,9 +68,9 @@ def main(args):
 
     # load model parameters
     ckpt_dir = args['ckpt_dir']
-    ckpt_path = os.path.join(ckpt_dir, 'policy_best.ckpt')
+    # ckpt_path = os.path.join(ckpt_dir, 'policy_best.ckpt')
     # ckpt_path = os.path.join(ckpt_dir, 'policy_last.ckpt')
-    # ckpt_path = os.path.join(ckpt_dir, 'policy_step_109500_seed_0.ckpt')
+    ckpt_path = os.path.join(ckpt_dir, 'policy_step_159000_seed_0.ckpt')
     
     print('ckpt_path: ', ckpt_path)
     config_path = os.path.join(ckpt_dir, 'config.pkl')
@@ -130,6 +131,7 @@ def main(args):
         '/actions/pose': [],
         '/actions/gripper_pos': []
     }
+    
     for cam_name in camera_names:
         data_dict[f'/observations/images/{cam_name}'] = []
         data_dict[f'/observations/depth_images/{cam_name}'] = []
@@ -173,8 +175,17 @@ def main(args):
     gripper.control_thread_start()
     dsr.control_thread_start()
 
+    dsr_state_xpos = dsr.get_xpos()
+    dsr_state_euler = dsr.get_euler()
+    gripper_state = gripper.get_state()
+
+    dsr_state_rotm6d = np.zeros(0)
+    for r in range(num_robots):
+        dsr_state_rotation = Rotation.from_euler("ZYZ", dsr_state_euler[3*r:3*r+3], degrees=True)
+        dsr_state_rotm = dsr_state_rotation.as_matrix()
+        dsr_state_rotm6d = np.concatenate( (dsr_state_rotm6d, dsr_state_rotm[:, 0], dsr_state_rotm[:, 1]), axis = -1)
     #initialize
-    robot_state = np.concatenate([dsr.get_xpos(), dsr.get_euler(), gripper.get_state()], axis=-1)
+    robot_state = np.concatenate([dsr_state_xpos, dsr_state_rotm6d, gripper_state], axis=-1)
     # robot_state = pre_process(robot_state)
     robot_obs_history[:] = robot_state
 
@@ -194,6 +205,11 @@ def main(args):
         dsr_state_euler = dsr.get_euler()
         gripper_state = gripper.get_state()
         
+        dsr_state_rotm6d = np.zeros(0)
+        for r in range(num_robots):
+            dsr_state_rotation = Rotation.from_euler("ZYZ", dsr_state_euler[3*r:3*r+3], degrees=True)
+            dsr_state_rotm = dsr_state_rotation.as_matrix()
+            dsr_state_rotm6d = np.concatenate( (dsr_state_rotm6d, dsr_state_rotm[:, 0], dsr_state_rotm[:, 1]), axis = -1)
 
         # if t%1 == 0:
         if True:
@@ -201,7 +217,7 @@ def main(args):
             with torch.inference_mode():
                 ### get input data
                 ## ROBOT STATE INPUT
-                robot_state = np.concatenate([dsr_state_xpos, dsr_state_euler, gripper_state], axis=-1)
+                robot_state = np.concatenate([dsr_state_xpos, dsr_state_rotm6d, gripper_state], axis=-1)
                 
                 if num_robot_obs >1:
                     robot_obs_history[1:] = robot_obs_history[:-1]
@@ -316,8 +332,8 @@ def main(args):
                 # print('all_action: ', all_actions)
             
 
-                print('action: ', action)
-                print('robot_state: ', robot_state)
+                # print('action: ', action)
+                # print('robot_state: ', robot_state)
                 # for i in range(10):
                 #     t1 = time.time()
                 #     dsr.step()
@@ -336,10 +352,32 @@ def main(args):
                     break
         
         # action = all_actions[t%10][:]
+        action_euler = np.zeros(0)
+        for r in range(num_robots):
+            action_rotm6d = action[3*num_robots+6*r:3*num_robots+6*(r+1)]
+            action_rotm_x_axis = action_rotm6d[0:3]/np.linalg.norm(action_rotm6d[0:3])
+            action_rotm_y_axis = action_rotm6d[3:6]
+            action_rotm_y_axis = action_rotm_y_axis - np.dot(action_rotm_y_axis, action_rotm_x_axis) * action_rotm_x_axis
+            action_rotm_y_axis = action_rotm_y_axis/np.linalg.norm(action_rotm_y_axis)
+            action_rotm_z_axis = np.cross(action_rotm_x_axis, action_rotm_y_axis)
+            action_rotm_z_axis = action_rotm_z_axis/np.linalg.norm(action_rotm_z_axis)
+            action_rotm = np.concatenate([action_rotm_x_axis[:,None], action_rotm_y_axis[:,None], action_rotm_z_axis[:,None]], axis=1)
+            action_rotation = Rotation.from_matrix(action_rotm)
+            action_euler = np.concatenate( [action_euler, action_rotation.as_euler("ZYZ", degrees = True)], axis=-1)
 
+        
+        dsr_desired_pose = np.zeros(0)
+        for r in range(num_robots):
+            dsr_desired_pose = np.concatenate( [dsr_desired_pose, action[3*r:3*r+3], action_euler[3*r:3*r+3]])
+        desired_gripper_pose = action[-num_robots:]
+
+        # print('desired_gripper_pose: ', desired_gripper_pose)
+        # print('dsr_desired_pose: ', dsr_desired_pose)
+        # print('dsr_state_xpos: ', dsr_state_xpos)
+        # print('dsr_state_euler: ', dsr_state_euler)
         ## command robot
-        dsr.set_action(action[:12])
-        gripper.set_action(action[12:14])
+        dsr.set_action(dsr_desired_pose)
+        gripper.set_action(desired_gripper_pose)
 
         # dsr.step() # for ROS topic publish
 

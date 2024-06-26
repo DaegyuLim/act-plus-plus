@@ -153,6 +153,7 @@ class DETRVAE(nn.Module):
         env_state: None
         actions: batch, seq, action_dim
         """
+
         latent_input, probs, binaries, mu, logvar = self.encode(qpos, actions, is_pad, vq_sample)
         bs = qpos.shape[0]
         # cvae decoder
@@ -167,8 +168,11 @@ class DETRVAE(nn.Module):
                     pos = pos[0]
                     all_cam_features.append(self.input_proj(features))
                     all_cam_pos.append(pos)
+                    del features, pos
+
+            torch.cuda.empty_cache()
+
             # proprioception features
-            
             proprio_input = self.input_proj_robot_state(qpos.reshape(bs, -1))
             # fold camera dimension into width dimension
             src = torch.cat(all_cam_features, axis=3)

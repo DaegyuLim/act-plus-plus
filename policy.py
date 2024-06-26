@@ -212,12 +212,13 @@ class ACTPolicy(nn.Module):
                                          std=[0.229, 0.224, 0.225])
         image = normalize(image)
         if actions is not None: # training time
-            actions = actions[:, :self.model.num_queries]
-            is_pad = is_pad[:, :self.model.num_queries]
+            # actions = actions[:, :self.model.num_queries]
+            # is_pad = is_pad[:, :self.model.num_queries]
 
             loss_dict = dict()
             a_hat, is_pad_hat, (mu, logvar), probs, binaries = self.model(robot_state, image, env_state, actions, is_pad, vq_sample)
-            if self.vq or self.model.encoder is None:
+            # if self.vq or self.model.encoder is None:
+            if False:
                 total_kld = [torch.tensor(0.0)]
             else:
                 total_kld, dim_wise_kld, mean_kld = kl_divergence(mu, logvar)
@@ -230,7 +231,7 @@ class ACTPolicy(nn.Module):
             loss_dict['loss'] = loss_dict['l1'] + loss_dict['kl'] * self.kl_weight
             return loss_dict
         else: # inference time
-            a_hat, is_pad_hat, (_, _), _, _ = self.model(robot_state, image, env_state, vq_sample=vq_sample) # no action, sample from prior
+            a_hat, _, (_, _), _, _ = self.model(robot_state, image, env_state, vq_sample=vq_sample) # no action, sample from prior
             # return a_hat, is_pad_hat
             return a_hat
 

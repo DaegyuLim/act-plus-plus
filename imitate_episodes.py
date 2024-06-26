@@ -11,6 +11,8 @@ from einops import rearrange
 import wandb
 import time
 import torchvision.transforms.v2 as transforms
+import GPUtil
+
 
 from robot.constants import HZ
 from utils import load_data # data functions
@@ -69,8 +71,8 @@ def main(args):
     name_filter = task_config.get('name_filter', lambda n: True)
 
     # fixed parameters
-    state_dim = 7
-    action_dim = 7
+    state_dim = 20
+    action_dim = 20
     lr_backbone = 1e-5
     backbone = 'resnet18'
     if policy_class == 'ACT':
@@ -118,7 +120,7 @@ def main(args):
         policy_config = {'lr': args['lr'], 'lr_backbone': lr_backbone, 'backbone' : backbone, 'num_queries': 1,
                          'camera_names': camera_names,}
     else:
-        raise NotImplementedError
+        raise NotImplementedError(f'policy class {policy_class} is not defined')
 
     actuator_config = {
         'actuator_network_dir': args['actuator_network_dir'],
@@ -155,7 +157,7 @@ def main(args):
     config_path = os.path.join(ckpt_dir, 'config.pkl')
     expr_name = ckpt_dir.split('/')[-1]
     if is_wandb and not is_eval:
-        wandb.init(project="robros_dsr_block_sort_ablation", reinit=True, entity="daegyulim", name=expr_name)
+        wandb.init(project="dsr_block_dnq", reinit=True, entity="daegyulim", name=expr_name)
         wandb.config.update(config)
     with open(config_path, 'wb') as f:
         pickle.dump(config, f)
@@ -174,6 +176,7 @@ def main(args):
 
     train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, name_filter, camera_names, batch_size_train, batch_size_val, args['chunk_size'], args['robot_obs_size'], args['img_obs_size'], args['img_obs_every'], args['skip_mirrored_data'], config['load_pretrain'], policy_class, stats_dir_l=stats_dir, sample_weights=sample_weights, train_ratio=train_ratio, use_depth=use_depth)
 
+    GPUtil.showUtilization()
     # save dataset stats
     stats_path = os.path.join(ckpt_dir, f'dataset_stats.pkl')
     with open(stats_path, 'wb') as f:
@@ -188,6 +191,8 @@ def main(args):
     print(f'Best ckpt, val loss {min_val_loss:.6f} @ step{best_step}')
     if is_wandb:
         wandb.finish()
+
+    torch.cuda.empty_cache()
 
 
 def make_policy(policy_class, policy_config):
@@ -543,7 +548,6 @@ def forward_pass(data, policy):
     image_data, robot_proprio_data, action_data, is_pad = image_data.cuda(), robot_proprio_data.cuda(), action_data.cuda(), is_pad.cuda()
     return policy(robot_proprio_data, image_data, action_data, is_pad) # TODO remove None
 
-
 def train_bc(train_dataloader, val_dataloader, config):
     num_steps = config['num_steps']
     ckpt_dir = config['ckpt_dir']
@@ -603,7 +607,8 @@ def train_bc(train_dataloader, val_dataloader, config):
             for k, v in validation_summary.items():
                 summary_string += f'{k}: {v.item():.3f} '
             print(summary_string)
-                
+
+
         # evaluation
         if (step > 0) and (step % eval_every == 0):
             # first save then eval
@@ -616,13 +621,16 @@ def train_bc(train_dataloader, val_dataloader, config):
 
         # training
         policy.train()
-        optimizer.zero_grad()
+        
         data = next(train_dataloader)
         forward_dict = forward_pass(data, policy)
+
         # backward
         loss = forward_dict['loss']
         loss.backward()
         optimizer.step()
+        optimizer.zero_grad()
+
         if is_wandb:
             wandb.log(forward_dict, step=step) # not great, make training 1-2% slower
 
@@ -656,7 +664,7 @@ if __name__ == '__main__':
     parser.add_argument('--wandb', action='store_true')
     parser.add_argument('--ckpt_dir', action='store', type=str, default='/home/robros-ai/dg/robros_imitation_learning/ckpt/dsr_block_sort', help='ckpt_dir', required=True)
     parser.add_argument('--policy_class', action='store', type=str, default='ACT', help='policy_class, capitalize', required=True)
-    parser.add_argument('--task_name', action='store', type=str, default='dsr_block_collect', help='task_name', required=True)
+    parser.add_argument('--task_name', action='store', type=str, default='dsr_block_disassemble_and_sort', help='task_name', required=True)
     parser.add_argument('--batch_size', action='store', type=int, default=16, help='batch_size', required=True)
     parser.add_argument('--seed', action='store', type=int, default=0, help='seed', required=True)
     parser.add_argument('--num_steps', action='store', type=int, default=100000, help='num_steps', required=True)
