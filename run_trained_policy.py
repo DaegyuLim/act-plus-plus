@@ -38,22 +38,27 @@ ROBOT_MODEL = "a0509"
 
 
 def main(args):
-    image_recorder = ImageRecorder(init_node=False)
-    dsr = drlControl(ROBOT_ID, HZ, init_node=True, teleop=False)
-    gripper = gripperControl(ROBOT_ID, HZ, init_node=False, teleop=False)
 
     task_config = TASK_CONFIGS[args['task_name']]
     dataset_dir = task_config['dataset_dir']
     max_timesteps = task_config['episode_len']
     camera_names = task_config['camera_names']
-    
+    robot_id_list = task_config['robot_id_list']
+
+    image_recorder = ImageRecorder(camera_names = task_config['camera_names'], init_node=False)
+    dsr = drlControl(robot_id_list = robot_id_list, hz = HZ, init_node=True, teleop=False)
+    gripper = gripperControl(robot_id_list = robot_id_list, hz = HZ, init_node=False, teleop=False)
+
     temporal_ensemble = True
     record_data = False
     use_depth = False
     overwrite = False
     reletive_obs_mode = False
     reletive_action_mode = False
-    esb_k = 0.01
+    trained_on_gpu_server = False
+    esb_k = 0.03
+    
+    num_robots = len(robot_id_list)
 
     dataset_name = 'real_robot_evaluation'
     print(args['task_name'] + ', ' + dataset_name + '\n' )
@@ -63,7 +68,10 @@ def main(args):
 
     # load model parameters
     ckpt_dir = args['ckpt_dir']
-    ckpt_path = os.path.join(ckpt_dir, 'policy_best.ckpt')
+    # ckpt_path = os.path.join(ckpt_dir, 'policy_best.ckpt')
+    # ckpt_path = os.path.join(ckpt_dir, 'policy_last.ckpt')
+    ckpt_path = os.path.join(ckpt_dir, 'policy_step_159000_seed_0.ckpt')
+    
     print('ckpt_path: ', ckpt_path)
     config_path = os.path.join(ckpt_dir, 'config.pkl')
     with open(config_path, 'rb') as f:
@@ -72,8 +80,9 @@ def main(args):
     policy_class = config['policy_class']
     policy_config = config['policy_config']
     policy = make_policy(policy_class, policy_config)
-    policy.model = nn.DataParallel(policy.model)
-    loading_status = policy.deserialize(torch.load(ckpt_path))
+    if trained_on_gpu_server:
+        policy.model = nn.DataParallel(policy.model)
+    loading_status = policy.deserialize(torch.load(ckpt_path, map_location = torch.device('cpu')))
     print(f'Loaded policy from: {ckpt_path} ({loading_status})')
     policy.cuda()
 
@@ -82,6 +91,8 @@ def main(args):
         stats = pickle.load(f)
 
     # prepare action list for temporal ensemble
+    state_dim = policy_config['state_dim']
+    action_dim = policy_config['action_dim']
     num_queries = policy_config['num_queries']
     num_robot_obs = policy_config['num_robot_observations']
     num_image_obs = policy_config['num_image_observations']
@@ -90,11 +101,11 @@ def main(args):
     image_obs_history = dict()
     depth_obs_history = dict()
     if reletive_obs_mode:
-        robot_obs_history = np.zeros((num_robot_obs+1, 7), dtype=np.float32)
-        relative_robot_obs_history = np.zeros((num_robot_obs, 7), dtype=np.float32)
+        robot_obs_history = np.zeros((num_robot_obs+1, state_dim), dtype=np.float32)
+        relative_robot_obs_history = np.zeros((num_robot_obs, state_dim), dtype=np.float32)
     else:
-        robot_obs_history = np.zeros((num_robot_obs, 7), dtype=np.float32)
-    all_time_actions = np.zeros((max_timesteps, max_timesteps+num_queries, 7), dtype=np.float32)
+        robot_obs_history = np.zeros((num_robot_obs, state_dim), dtype=np.float32)
+    all_time_actions = np.zeros((max_timesteps, max_timesteps+num_queries, action_dim), dtype=np.float32)
     
 
 
@@ -161,12 +172,20 @@ def main(args):
         time.sleep(1.0)
 
     #ready gripper thread
-    gripper_thread = threading.Thread(target=gripper.control_loop)
-    gripper_thread.daemon = True
-    gripper_thread.start()
+    gripper.control_thread_start()
+    dsr.control_thread_start()
 
+    dsr_state_xpos = dsr.get_xpos()
+    dsr_state_euler = dsr.get_euler()
+    gripper_state = gripper.get_state()
+
+    dsr_state_rotm6d = np.zeros(0)
+    for r in range(num_robots):
+        dsr_state_rotation = Rotation.from_euler("ZYZ", dsr_state_euler[3*r:3*r+3], degrees=True)
+        dsr_state_rotm = dsr_state_rotation.as_matrix()
+        dsr_state_rotm6d = np.concatenate( (dsr_state_rotm6d, dsr_state_rotm[:, 0], dsr_state_rotm[:, 1]), axis = -1)
     #initialize
-    robot_state = np.concatenate([dsr.get_xpos(), dsr.get_euler(), gripper.get_state()], axis=-1)
+    robot_state = np.concatenate([dsr_state_xpos, dsr_state_rotm6d, gripper_state], axis=-1)
     # robot_state = pre_process(robot_state)
     robot_obs_history[:] = robot_state
 
@@ -185,7 +204,12 @@ def main(args):
         dsr_state_xpos = dsr.get_xpos()
         dsr_state_euler = dsr.get_euler()
         gripper_state = gripper.get_state()
-        dsr_rotation = Rotation.from_euler("ZYZ", dsr_state_euler, degrees=True)
+        
+        dsr_state_rotm6d = np.zeros(0)
+        for r in range(num_robots):
+            dsr_state_rotation = Rotation.from_euler("ZYZ", dsr_state_euler[3*r:3*r+3], degrees=True)
+            dsr_state_rotm = dsr_state_rotation.as_matrix()
+            dsr_state_rotm6d = np.concatenate( (dsr_state_rotm6d, dsr_state_rotm[:, 0], dsr_state_rotm[:, 1]), axis = -1)
 
         # if t%1 == 0:
         if True:
@@ -193,7 +217,7 @@ def main(args):
             with torch.inference_mode():
                 ### get input data
                 ## ROBOT STATE INPUT
-                robot_state = np.concatenate([dsr_state_xpos, dsr_state_euler, gripper_state], axis=-1)
+                robot_state = np.concatenate([dsr_state_xpos, dsr_state_rotm6d, gripper_state], axis=-1)
                 
                 if num_robot_obs >1:
                     robot_obs_history[1:] = robot_obs_history[:-1]
@@ -214,7 +238,7 @@ def main(args):
                         relative_robot_obs_history[t_obs, 0:3] = (reference_state_rotation.as_matrix().transpose()).dot(robot_obs_history[t_obs+1, 0:3] - reference_state_pos)
                     # pass gripper position
                     relative_robot_obs_history[:, 6] = robot_obs_history[:-1, 6]
-                    # print('relative_robot_obs_history pre: \n', relative_robot_obs_history)
+                    print('relative_robot_obs_history pre: \n', relative_robot_obs_history)
                     relative_robot_obs_history = pre_process(relative_robot_obs_history)
                     # print('relative_robot_obs_history post: \n', relative_robot_obs_history)
                     robot_obs_history_flat = relative_robot_obs_history.reshape([-1])
@@ -267,15 +291,17 @@ def main(args):
                 t3 = time.time()
                 # print('all_actions: \n', all_actions[:30])
                 if reletive_action_mode:
+                    dsr_rotation = Rotation.from_euler("ZYZ", dsr_state_euler, degrees=True)
                     dsr_state_rotm = dsr_rotation.as_matrix()
                     rel_all_actions = all_actions
                     
                     rel_all_actions_rotation = Rotation.from_rotvec(rel_all_actions[:, 3:6])
                     all_actions_rotm = dsr_state_rotm * rel_all_actions_rotation.as_matrix()[:]
                     all_actions_rotation = Rotation.from_matrix(all_actions_rotm)
-                    # position
+                    
                     for i in range(num_queries):
-                        all_actions[i, 0:3] = dsr_state_xpos[:] + dsr_state_rotm.dot(rel_all_actions[i, 0:3])
+                        # position
+                        all_actions[i, 0:3] = dsr_state_xpos + dsr_state_rotm.dot(rel_all_actions[i, 0:3])
                         # euler
                         all_actions[i, 3:6] = all_actions_rotation[i].as_euler("ZYZ", degrees=True)
                 
@@ -303,7 +329,7 @@ def main(args):
                 
                 # action = np.squeeze(action, axis=0)
                 
-                # print('all_action: ', all_action)
+                # print('all_action: ', all_actions)
             
 
                 # print('action: ', action)
@@ -326,12 +352,34 @@ def main(args):
                     break
         
         # action = all_actions[t%10][:]
+        action_euler = np.zeros(0)
+        for r in range(num_robots):
+            action_rotm6d = action[3*num_robots+6*r:3*num_robots+6*(r+1)]
+            action_rotm_x_axis = action_rotm6d[0:3]/np.linalg.norm(action_rotm6d[0:3])
+            action_rotm_y_axis = action_rotm6d[3:6]
+            action_rotm_y_axis = action_rotm_y_axis - np.dot(action_rotm_y_axis, action_rotm_x_axis) * action_rotm_x_axis
+            action_rotm_y_axis = action_rotm_y_axis/np.linalg.norm(action_rotm_y_axis)
+            action_rotm_z_axis = np.cross(action_rotm_x_axis, action_rotm_y_axis)
+            action_rotm_z_axis = action_rotm_z_axis/np.linalg.norm(action_rotm_z_axis)
+            action_rotm = np.concatenate([action_rotm_x_axis[:,None], action_rotm_y_axis[:,None], action_rotm_z_axis[:,None]], axis=1)
+            action_rotation = Rotation.from_matrix(action_rotm)
+            action_euler = np.concatenate( [action_euler, action_rotation.as_euler("ZYZ", degrees = True)], axis=-1)
 
+        
+        dsr_desired_pose = np.zeros(0)
+        for r in range(num_robots):
+            dsr_desired_pose = np.concatenate( [dsr_desired_pose, action[3*r:3*r+3], action_euler[3*r:3*r+3]])
+        desired_gripper_pose = action[-num_robots:]
+
+        # print('desired_gripper_pose: ', desired_gripper_pose)
+        # print('dsr_desired_pose: ', dsr_desired_pose)
+        # print('dsr_state_xpos: ', dsr_state_xpos)
+        # print('dsr_state_euler: ', dsr_state_euler)
         ## command robot
-        dsr.set_action(action[:6])
-        gripper.set_action(action[-1])
+        dsr.set_action(dsr_desired_pose)
+        gripper.set_action(desired_gripper_pose)
 
-        dsr.step() # for ROS topic publish
+        # dsr.step() # for ROS topic publish
 
         if record_data:
             dsr_action = dsr.get_action()
@@ -496,6 +544,6 @@ def make_policy(policy_class, policy_config):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--ckpt_dir', action='store', type=str, help='Check Point Directory.', required=True)
-    parser.add_argument('--task_name', action='store', type=str, help='Task name.', default='dsr_block_sort', required=False)
+    parser.add_argument('--task_name', action='store', type=str, help='Task name.', default='dsr_block_disassemble_and_sort', required=False)
     main(vars(parser.parse_args())) # TODO
     # debug()

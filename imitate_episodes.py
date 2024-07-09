@@ -228,9 +228,9 @@ def get_image(ts, camera_names, rand_crop_resize=False):
 
 
 def forward_pass(data, policy):
-    image_data, qpos_data, action_data, is_pad = data
-    image_data, qpos_data, action_data, is_pad = image_data.cuda(), qpos_data.cuda(), action_data.cuda(), is_pad.cuda()
-    return policy(qpos_data, image_data, action_data, is_pad) # TODO remove None
+    image_data, robot_proprio_data, action_data, is_pad = data
+    image_data, robot_proprio_data, action_data, is_pad = image_data.cuda(), robot_proprio_data.cuda(), action_data.cuda(), is_pad.cuda()
+    return policy(robot_proprio_data, image_data, action_data, is_pad) # TODO remove None
 
 def train_bc(train_dataloader, val_dataloader, config):
     num_steps = config['num_steps']

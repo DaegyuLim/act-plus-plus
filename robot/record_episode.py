@@ -93,13 +93,13 @@ def main(args):
         while images[cam_name] is None:
             print('waiting '+cam_name+' image streaming...')
             if rospy.is_shutdown():
-                break
+                return
             time.sleep(1.0)
             images = image_recorder.get_images()
         # while depth_images[cam_name] is None:
         #     print('waiting '+cam_name+' depth image streaming...')
         #     if rospy.is_shutdown():
-        #         break
+        #         return
         #     time.sleep(1.0)
         #     images = image_recorder.get_images()
     print('Hold Master Arm Handle and wait for connection')
@@ -111,7 +111,7 @@ def main(args):
         print(10 - cnt, 'seconds before to start DATA COLLECTION!!!')
         time.sleep(1.0)
         if rospy.is_shutdown():
-                break
+                return
 
     #ready gripper thread
 
@@ -141,7 +141,7 @@ def main(args):
         data_dict['/observations/gripper_pos'].append(gripper_state)
         data_dict['/actions/pose'].append(dsr_action)
         data_dict['/actions/gripper_pos'].append(gripper_action)
-
+        
         for cam_name in camera_names:
             data_dict[f'/observations/images/{cam_name}'].append((image_recorder.get_images())[cam_name])
             # data_dict[f'/observations/depth_images/{cam_name}'].append((image_recorder.get_depth_images())[cam_name])
@@ -161,7 +161,7 @@ def main(args):
             gripper.open()
             dsr.control_thread_stop()
             gripper.control_thread_stop()
-            break
+            return
         rate.sleep()
     
     print(f'Avg Control Frequency [Hz]: {max_timesteps / (time.time() - time0)}')

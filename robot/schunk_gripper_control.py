@@ -46,6 +46,7 @@ class singleGripperControl:
 
         self.controller_inputs_raw = 0.0
         self.controller_inputs = 0.0
+        self.get_gripper_raw_input = True
 
         self.gripper_desired_position_buffer = np.zeros(8)
 
@@ -257,7 +258,14 @@ class singleGripperControl:
             rate.sleep()
 
     def open(self):
-        self.gripper_command = 0.0
+        if self.teleop == True:
+            self.gripper_command = 0.0
+            self.gripper_desired_position_buffer = np.zeros(8)
+            self.controller_inputs = 0.0
+            self.controller_inputs_raw = 0.0
+            self.get_gripper_raw_input = False
+        else:
+            self.gripper_command = 0.0
 
     def close(self):
         self.gripper_command = 1.0
@@ -272,7 +280,8 @@ class singleGripperControl:
         self.policy_gripper_command = gripper_action
 
     def readTriggerInputs(self):
-        self.controller_inputs = self.controller_inputs_raw
+        if self.get_gripper_raw_input:
+            self.controller_inputs = self.controller_inputs_raw
         self.gripper_desired_position_buffer[1:] = self.gripper_desired_position_buffer[0:-1]
         self.gripper_desired_position_buffer[0] = self.controller_inputs
         self.gripper_command = np.mean(self.gripper_desired_position_buffer)
@@ -375,6 +384,6 @@ class gripperControl:
     
 
 if __name__ == "__main__":
-    # gripper_control = gripperControl(robot_id_list = ['dsr_l', 'dsr_r'], hz=20, init_node=True, teleop=True)
-    gripper_control = gripperControl(robot_id_list = ['dsr_r'], hz=20, init_node=True, teleop=True)
+    gripper_control = gripperControl(robot_id_list = ['dsr_l', 'dsr_r'], hz=20, init_node=True, teleop=True)
+    # gripper_control = gripperControl(robot_id_list = ['dsr_r'], hz=20, init_node=True, teleop=True)
     gripper_control.control_thread_start()
