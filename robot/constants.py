@@ -12,14 +12,14 @@ TASK_CONFIGS = {
     },
     'dsr_block_sort':{
         'dataset_dir': DATA_DIR + '/dsr_block_sort',
-        'episode_len': 40000,
+        'episode_len': 4000,
         'train_ratio': 0.95,
         'camera_names': ['lhand_camera'],
         'robot_id_list': ['dsr_l'],
     },
     'dsr_block_disassemble_and_sort':{
-        'dataset_dir': DATA_DIR + '/dsr_block_disassemble_and_sort/240626_disassemble_and_sort',
-        'episode_len': 18000,
+        'dataset_dir': DATA_DIR + '/dsr_block_disassemble_and_sort/240708_sort_only_dg',
+        'episode_len': 1200,
         'train_ratio': 0.95,
         'camera_names': ['lhand_camera', 'rhand_camera'],
         'robot_id_list': ['dsr_l', 'dsr_r'],

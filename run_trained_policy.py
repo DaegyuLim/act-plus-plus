@@ -49,15 +49,21 @@ def main(args):
     dsr = drlControl(robot_id_list = robot_id_list, hz = HZ, init_node=True, teleop=False)
     gripper = gripperControl(robot_id_list = robot_id_list, hz = HZ, init_node=False, teleop=False)
 
+    # Parameters
     temporal_ensemble = True
+    esb_k = 0.01
+    policy_update_period = 10 # tick, work without temporal ensemble
     record_data = False
     use_depth = False
     overwrite = False
     reletive_obs_mode = False
     reletive_action_mode = False
     trained_on_gpu_server = False
-    esb_k = 0.03
+    use_rotm6d = True
+    img_downsampling = True
+    img_downsampling_size = (640, 180)
     
+
     num_robots = len(robot_id_list)
 
     dataset_name = 'real_robot_evaluation'
@@ -70,7 +76,7 @@ def main(args):
     ckpt_dir = args['ckpt_dir']
     # ckpt_path = os.path.join(ckpt_dir, 'policy_best.ckpt')
     # ckpt_path = os.path.join(ckpt_dir, 'policy_last.ckpt')
-    ckpt_path = os.path.join(ckpt_dir, 'policy_step_159000_seed_0.ckpt')
+    ckpt_path = os.path.join(ckpt_dir, 'policy_step_49000_seed_1.ckpt')
     
     print('ckpt_path: ', ckpt_path)
     config_path = os.path.join(ckpt_dir, 'config.pkl')
@@ -151,6 +157,7 @@ def main(args):
                 break
             time.sleep(1.0)
             images = image_recorder.get_images()
+
         images_size[cam_name] = images[cam_name].shape # h w c
 
         if use_depth:
@@ -179,25 +186,37 @@ def main(args):
     dsr_state_euler = dsr.get_euler()
     gripper_state = gripper.get_state()
 
-    dsr_state_rotm6d = np.zeros(0)
-    for r in range(num_robots):
-        dsr_state_rotation = Rotation.from_euler("ZYZ", dsr_state_euler[3*r:3*r+3], degrees=True)
-        dsr_state_rotm = dsr_state_rotation.as_matrix()
-        dsr_state_rotm6d = np.concatenate( (dsr_state_rotm6d, dsr_state_rotm[:, 0], dsr_state_rotm[:, 1]), axis = -1)
-    #initialize
-    robot_state = np.concatenate([dsr_state_xpos, dsr_state_rotm6d, gripper_state], axis=-1)
+    if use_rotm6d is True:
+        dsr_state_rotm6d = np.zeros(0)
+        for r in range(num_robots):
+            dsr_state_rotation = Rotation.from_euler("ZYZ", dsr_state_euler[3*r:3*r+3], degrees=True)
+            dsr_state_rotm = dsr_state_rotation.as_matrix()
+            dsr_state_rotm6d = np.concatenate( (dsr_state_rotm6d, dsr_state_rotm[:, 0], dsr_state_rotm[:, 1]), axis = -1)
+        #initialize
+        robot_state = np.concatenate([dsr_state_xpos, dsr_state_rotm6d, gripper_state], axis=-1)
+    else:
+        robot_state = np.concatenate([dsr_state_xpos, dsr_state_euler, gripper_state], axis=-1)
+
     # robot_state = pre_process(robot_state)
     robot_obs_history[:] = robot_state
 
     image_sampling = range(0, (num_image_obs-1)*image_obs_every+1, image_obs_every)
     for cam_name in camera_names:
-        first_image = rearrange(image_recorder.get_images()[cam_name], 'h w c -> c h w')
+        first_image = image_recorder.get_images()[cam_name]
+        # first_image_for_show = cv2.cvtColor(first_image, cv2.COLOR_RGB2BGR)
+        # cv2.imshow('first_image', first_image_for_show)
+        # cv2.waitKey(0)
+        if img_downsampling:
+            first_image = cv2.resize(first_image, dsize=img_downsampling_size, interpolation=cv2.INTER_LINEAR)
+        first_image = rearrange(first_image, 'h w c -> c h w')
+
         image_obs_history[cam_name] = np.repeat(first_image[np.newaxis, :, :, :], (num_image_obs-1)*image_obs_every + 1, axis=0) #0xxx0xxx0
         if use_depth:
             first_depth = np.array([image_recorder.get_depth_images()[cam_name], image_recorder.get_depth_images()[cam_name], image_recorder.get_depth_images()[cam_name]])
             depth_obs_history[cam_name] = np.repeat(first_depth[np.newaxis, :, :, :], (num_image_obs-1)*image_obs_every + 1, axis=0) #0xxx0xxx0
                 
     print('Start!')
+
     time0 = time.time()
     for t in tqdm(range(max_timesteps)):
         t0 = time.time() #
@@ -217,7 +236,10 @@ def main(args):
             with torch.inference_mode():
                 ### get input data
                 ## ROBOT STATE INPUT
-                robot_state = np.concatenate([dsr_state_xpos, dsr_state_rotm6d, gripper_state], axis=-1)
+                if use_rotm6d is True:
+                    robot_state = np.concatenate([dsr_state_xpos, dsr_state_rotm6d, gripper_state], axis=-1)
+                else:
+                    robot_state = np.concatenate([dsr_state_xpos, dsr_state_euler, gripper_state], axis=-1)
                 
                 if num_robot_obs >1:
                     robot_obs_history[1:] = robot_obs_history[:-1]
@@ -249,8 +271,13 @@ def main(args):
                 t1 = time.time()
                 ## CAMERA INPUT
                 for cam_name in camera_names:
-                    current_image = rearrange(image_recorder.get_images()[cam_name], 'h w c -> c h w')
-                    
+                    current_image = image_recorder.get_images()[cam_name]
+                    if img_downsampling:
+                        current_image = cv2.resize(current_image, dsize=img_downsampling_size, interpolation=cv2.INTER_LINEAR)
+                    # current_image = rearrange(image_recorder.get_images()[cam_name], 'h w c -> c h w')
+                    current_image = rearrange(current_image, 'h w c -> c h w')
+
+
                     if num_image_obs >1:
                         image_obs_history[cam_name][1:] =  image_obs_history[cam_name][:-1]
                         image_obs_history[cam_name][0] = current_image
@@ -309,20 +336,24 @@ def main(args):
                 # 
                 if temporal_ensemble:
                     all_time_actions[t, t:t+num_queries, :] = all_actions[:]
-                    action_bottom_idx = max(t-num_queries, 0)
+                    action_bottom_idx = max(t-num_queries+1, 0)
                     actions_for_curr_step = all_time_actions[ action_bottom_idx:(t+1), t, :] # (chunk_size, action_dim)
                     # actions_populated = np.all(actions_for_curr_step != 0, axis=1)
                     # print('actions_populated: ', actions_populated)
                     # actions_for_curr_step = actions_for_curr_step[actions_populated]
 
-                    exp_weights = np.exp(-esb_k * np.arange(len(actions_for_curr_step)))
+                    exp_weights = np.exp(esb_k * np.arange(len(actions_for_curr_step)))
                     exp_weights = exp_weights / exp_weights.sum()
                     exp_weights = np.expand_dims(exp_weights, axis=1).transpose() # (1, chunk_size)
 
                     # print(actions_for_curr_step.shape)
                     # print(exp_weights.shape)
                     action = np.sum(  exp_weights.dot(actions_for_curr_step), axis=0, keepdims=False)
-                # else:
+                else:
+                    if t%policy_update_period == 0:
+                        assert policy_update_period<num_queries
+                        action_trajectory = all_actions.copy()
+                    action = action_trajectory[t%policy_update_period, :]
                     # print('all_actions shape: ', all_actions.size())
                     # action = all_actions[0][:]
                     # print('action: ', action)
@@ -343,32 +374,36 @@ def main(args):
 
                 # 
 
-                # print("t1 - t0: ", t1-t0)
-                # print("t2 - t1: ", t2-t1)
-                # print("t3 - t2: ", t3-t2)
-                # print("t4 - t3: ", t4-t3)
-                # print("t4 - t0: ", t4-t0)
+                print("t1 - t0: ", t1-t0)
+                print("t2 - t1: ", t2-t1)
+                print("t3 - t2: ", t3-t2)
+                print("t4 - t3: ", t4-t3)
+                print("t4 - t0: ", t4-t0)
                 if rospy.is_shutdown():
                     break
         
         # action = all_actions[t%10][:]
-        action_euler = np.zeros(0)
-        for r in range(num_robots):
-            action_rotm6d = action[3*num_robots+6*r:3*num_robots+6*(r+1)]
-            action_rotm_x_axis = action_rotm6d[0:3]/np.linalg.norm(action_rotm6d[0:3])
-            action_rotm_y_axis = action_rotm6d[3:6]
-            action_rotm_y_axis = action_rotm_y_axis - np.dot(action_rotm_y_axis, action_rotm_x_axis) * action_rotm_x_axis
-            action_rotm_y_axis = action_rotm_y_axis/np.linalg.norm(action_rotm_y_axis)
-            action_rotm_z_axis = np.cross(action_rotm_x_axis, action_rotm_y_axis)
-            action_rotm_z_axis = action_rotm_z_axis/np.linalg.norm(action_rotm_z_axis)
-            action_rotm = np.concatenate([action_rotm_x_axis[:,None], action_rotm_y_axis[:,None], action_rotm_z_axis[:,None]], axis=1)
-            action_rotation = Rotation.from_matrix(action_rotm)
-            action_euler = np.concatenate( [action_euler, action_rotation.as_euler("ZYZ", degrees = True)], axis=-1)
+        if use_rotm6d is True:
+            action_euler = np.zeros(0)
+            for r in range(num_robots):
+                action_rotm6d = action[3*num_robots+6*r:3*num_robots+6*(r+1)]
+                action_rotm_x_axis = action_rotm6d[0:3]/np.linalg.norm(action_rotm6d[0:3])
+                action_rotm_y_axis = action_rotm6d[3:6]
+                action_rotm_y_axis = action_rotm_y_axis - np.dot(action_rotm_y_axis, action_rotm_x_axis) * action_rotm_x_axis
+                action_rotm_y_axis = action_rotm_y_axis/np.linalg.norm(action_rotm_y_axis)
+                action_rotm_z_axis = np.cross(action_rotm_x_axis, action_rotm_y_axis)
+                action_rotm_z_axis = action_rotm_z_axis/np.linalg.norm(action_rotm_z_axis)
+                action_rotm = np.concatenate([action_rotm_x_axis[:,None], action_rotm_y_axis[:,None], action_rotm_z_axis[:,None]], axis=1)
+                action_rotation = Rotation.from_matrix(action_rotm)
+                action_euler = np.concatenate( [action_euler, action_rotation.as_euler("ZYZ", degrees = True)], axis=-1)
 
+            
+            dsr_desired_pose = np.zeros(0)
+            for r in range(num_robots):
+                dsr_desired_pose = np.concatenate( [dsr_desired_pose, action[3*r:3*r+3], action_euler[3*r:3*r+3]])
+        else:
+            dsr_desired_pose = action[:6*num_robots]
         
-        dsr_desired_pose = np.zeros(0)
-        for r in range(num_robots):
-            dsr_desired_pose = np.concatenate( [dsr_desired_pose, action[3*r:3*r+3], action_euler[3*r:3*r+3]])
         desired_gripper_pose = action[-num_robots:]
 
         # print('desired_gripper_pose: ', desired_gripper_pose)

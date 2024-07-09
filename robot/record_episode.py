@@ -103,7 +103,7 @@ def main(args):
         #     time.sleep(1.0)
         #     images = image_recorder.get_images()
     print('Hold Master Arm Handle and wait for connection')
-    master_arms.dsrConnect(connect_delay=5.0, connect_spline_duration= 3.0)
+    master_arms.dsrConnect(connect_delay=5.0, connect_spline_duration= 5.0)
     time.sleep(5.0)
 
     print('Are you ready? Move the robot to the desired initial pose.')
