@@ -1,12 +1,13 @@
 python imitate_episodes.py \
---ckpt_dir ./ckpt/dsr_block_dnq/sort_only_chunk_40_obs_1_img_1_low_resol_jitter_batch_64_epi_300_seed_0 \
+--ckpt_dir ./ckpt/dsr_block_dnq/sort_only_chunk_40_obs_2_inter_gripper_img_2_low_resol_jitter_batch_28_dec_8_lr_1e-5_epi_600_seed_0 \
 --policy_class ACT \
 --task_name dsr_block_disassemble_and_sort \
---batch_size 64 \
+--batch_size 28 \
 --chunk_size 40 \
---robot_obs_size 1 \
---img_obs_size 1 \
---img_obs_every 10 \
+--robot_obs_size 2 \
+--img_obs_size 2 \
+--img_obs_every 2 \
 --seed 0 \
---num_steps 200000 \
+--num_steps 100000 \
+--lr 1e-5 \
 --wandb
