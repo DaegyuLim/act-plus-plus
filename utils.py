@@ -497,6 +497,7 @@ def load_data(dataset_dir_l, name_filter, camera_names, batch_size_train, batch_
     num_episodes_0 = len(dataset_path_list_list[0])
     dataset_path_list = flatten_list(dataset_path_list_list)
     dataset_path_list = [n for n in dataset_path_list if name_filter(n)]
+    
     # num_episodes_l = [len(dataset_path_list) for dataset_path_list in dataset_path_list_list]
     
     num_episodes_l = [len(dataset_path_list)]

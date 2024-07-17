@@ -72,10 +72,10 @@ def main(args):
     state_dim = 29
     action_dim = 20
     lr_backbone = 1e-5
-    backbone = 'resnet18'
+    backbone = 'resnet34'
     if policy_class == 'ACT':
-        enc_layers = 5
-        dec_layers = 8
+        enc_layers = 4
+        dec_layers = 7
         nheads = 16
         policy_config = {'lr': args['lr'],
                          'num_queries': args['chunk_size'],
