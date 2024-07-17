@@ -53,7 +53,6 @@ def get_args_parser():
                         help="Train segmentation head if the flag is provided")
 
     # repeat args in imitate_episodes just to avoid error. Will not be used
-    parser.add_argument('--eval', action='store_true')
     parser.add_argument('--onscreen_render', action='store_true')
     parser.add_argument('--wandb', action='store_true')
     parser.add_argument('--ckpt_dir', action='store', type=str, default='/home/robros-ai/dg/robros_imitation_learning/ckpt/default', help='ckpt_dir', required=False)

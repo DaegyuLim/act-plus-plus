@@ -20,32 +20,57 @@ def load_hdf5(dataset_dir, dataset_name):
         exit()
 
     with h5py.File(dataset_path, 'r') as root:
-        is_sim = root.attrs['sim']
-        qpos = root['/observations/qpos'][()]
-        qvel = root['/observations/qvel'][()]
-        action = root['/action'][()]
+        # is_sim = root.attrs['sim']
+        compressed = root.attrs.get('compress', False)
+        xpos = root['/observations/xpos'][()]
+        euler = root['/observations/euler'][()]
+        gripper_pos = root['/observations/gripper_pos'][()]
+        action_pose = root['/actions/pose'][()]
+        action_gripper = root['/actions/gripper_pos'][()]
         image_dict = dict()
         for cam_name in root[f'/observations/images/'].keys():
             image_dict[cam_name] = root[f'/observations/images/{cam_name}'][()]
 
-    return qpos, qvel, action, image_dict
+    return xpos, euler, gripper_pos,  action_pose, action_gripper, image_dict, compressed
 
 def main(args):
     dataset_dir = args['dataset_dir']
     episode_idx = args['episode_idx']
     ismirror = args['ismirror']
-    if ismirror:
-        dataset_name = f'mirror_episode_{episode_idx}'
+    if episode_idx is None:
+        index_list = get_auto_index_list(dataset_dir)
+        print(f'video index_list = {index_list}')
+        for episode_idx in index_list:
+            dataset_name = f'episode_{episode_idx}'
+            xpos, euler, gripper_pos,  action_pose, action_gripper, image_dict, compressed = load_hdf5(dataset_dir, dataset_name)
+            save_videos(image_dict, DT, video_path=os.path.join(dataset_dir, dataset_name + '_video.mp4'), is_compressed=compressed)
     else:
-        dataset_name = f'episode_{episode_idx}'
+        if ismirror:
+            dataset_name = f'mirror_episode_{episode_idx}'
+        else:
+            dataset_name = f'episode_{episode_idx}'
 
-    qpos, qvel, action, image_dict = load_hdf5(dataset_dir, dataset_name)
-    save_videos(image_dict, DT, video_path=os.path.join(dataset_dir, dataset_name + '_video.mp4'))
-    visualize_joints(qpos, action, plot_path=os.path.join(dataset_dir, dataset_name + '_qpos.png'))
-    # visualize_timestamp(t_list, dataset_path) # TODO addn timestamp back
+        xpos, euler, gripper_pos,  action_pose, action_gripper, image_dict, compressed = load_hdf5(dataset_dir, dataset_name)
+        save_videos(image_dict, DT, video_path=os.path.join(dataset_dir, dataset_name + '_video.mp4'), is_compressed=compressed)
+        # visualize_joints(qpos, action, plot_path=os.path.join(dataset_dir, dataset_name + '_qpos.png'))
+        # visualize_timestamp(t_list, dataset_path) # TODO addn timestamp back
+
+def get_auto_index_list(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
+    max_idx = 1000
+    if not os.path.isdir(dataset_dir):
+        raise Exception(f"dataset directory ({dataset_dir}) is not exist!")
+    index_list = []
+    for i in range(max_idx+1):
+        if os.path.isfile(os.path.join(dataset_dir, f'{dataset_name_prefix}episode_{i}.{data_suffix}')):
+            if not os.path.isfile(os.path.join(dataset_dir, f'{dataset_name_prefix}episode_{i}_video.mp4')):
+                index_list.append(i)
+    return index_list
+    
+    
 
 
-def save_videos(video, dt, video_path=None):
+
+def save_videos(video, dt, video_path=None, is_compressed = True):
     if isinstance(video, list):
         cam_names = list(video[0].keys())
         cam_names = sorted(cam_names)
@@ -67,8 +92,21 @@ def save_videos(video, dt, video_path=None):
         cam_names = list(video.keys())
         cam_names = sorted(cam_names)
         all_cam_videos = []
-        for cam_name in cam_names:
-            all_cam_videos.append(video[cam_name])
+
+        if is_compressed:
+            for cam_name in cam_names:
+                decompressed_image_array = []
+                for i in range(len(video[cam_name])):
+                    decompressed_image = cv2.imdecode(video[cam_name][i], 1)
+                    # cv2.imshow('decoding', decompressed_image)
+                    # cv2.waitKey()
+                    decompressed_image_array.append(decompressed_image)
+                video[cam_name] = np.array(decompressed_image_array)
+                all_cam_videos.append(video[cam_name])
+        else:
+            for cam_name in cam_names:
+                all_cam_videos.append(video[cam_name])
+        
         all_cam_videos = np.concatenate(all_cam_videos, axis=2) # width dimension
 
         n_frames, h, w, _ = all_cam_videos.shape

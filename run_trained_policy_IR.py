@@ -59,11 +59,10 @@ def main(args):
     reletive_obs_mode = False
     reletive_action_mode = False
     trained_on_gpu_server = False
-    use_rotm6d = True
-    img_downsampling = True
+    use_rotm6d = False
+    img_downsampling = False
     img_downsampling_size = (640, 180)
-    use_inter_gripper_proprio_input = True
-    use_gpu_for_inference = True
+    use_inter_gripper_proprio_input = False
 
     num_robots = len(robot_id_list)
 
@@ -77,7 +76,7 @@ def main(args):
     ckpt_dir = args['ckpt_dir']
     # ckpt_path = os.path.join(ckpt_dir, 'policy_best.ckpt')
     # ckpt_path = os.path.join(ckpt_dir, 'policy_last.ckpt')
-    ckpt_path = os.path.join(ckpt_dir, 'policy_step_74000_seed_0.ckpt')
+    ckpt_path = os.path.join(ckpt_dir, 'policy_step_43000_seed_0.ckpt')
     
     print('ckpt_path: ', ckpt_path)
     config_path = os.path.join(ckpt_dir, 'config.pkl')
@@ -91,10 +90,7 @@ def main(args):
         policy.model = nn.DataParallel(policy.model)
     loading_status = policy.deserialize(torch.load(ckpt_path, map_location = torch.device('cpu')))
     print(f'Loaded policy from: {ckpt_path} ({loading_status})')
-    if use_gpu_for_inference:
-        policy.cuda()
-    else:
-        policy.cpu()
+    policy.cuda()
 
     stats_path = os.path.join(ckpt_dir, f'dataset_stats.pkl')
     with open(stats_path, 'rb') as f:
@@ -343,15 +339,9 @@ def main(args):
 
                 t2 = time.time()
                 # move data into GPU
-                if use_gpu_for_inference:
-                    robot_obs_history_flat = torch.from_numpy(robot_obs_history_flat).float().cuda().unsqueeze(0)
-                    cam_images = torch.from_numpy(all_cam_images / 255.0).float().cuda().unsqueeze(0)
-                else:
-                    robot_obs_history_flat = torch.from_numpy(robot_obs_history_flat).float().cpu().unsqueeze(0)
-                    cam_images = torch.from_numpy(all_cam_images / 255.0).float().cpu().unsqueeze(0)
-                    # robot_obs_history_flat = np.expand_dims(robot_obs_history_flat, axis=0)
-                    # cam_images = np.expand_dims(all_cam_images, axis=0)
-
+                robot_obs_history_flat = torch.from_numpy(robot_obs_history_flat).float().cuda().unsqueeze(0)
+                cam_images = torch.from_numpy(all_cam_images / 255.0).float().cuda().unsqueeze(0)
+                
                 # policy inference
                 all_actions = policy(robot_obs_history_flat, cam_images) # action dim: [1, chunk_size, action_dim]
                 all_actions = all_actions.cpu().numpy()
@@ -385,7 +375,7 @@ def main(args):
                     # print('actions_populated: ', actions_populated)
                     # actions_for_curr_step = actions_for_curr_step[actions_populated]
 
-                    exp_weights = np.exp( esb_k * np.arange(len(actions_for_curr_step)))
+                    exp_weights = np.exp(esb_k * np.arange(len(actions_for_curr_step)))
                     exp_weights = exp_weights / exp_weights.sum()
                     exp_weights = np.expand_dims(exp_weights, axis=1).transpose() # (1, chunk_size)
 

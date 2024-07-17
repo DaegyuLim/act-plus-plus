@@ -100,7 +100,7 @@ def save_videos(video, dt, video_path=None):
         out.release()
         print(f'Saved video to: {video_path}')
 
- 
+
 def load_and_save_first_episode_video(dataset_dir, video_path):
     dataset_name = 'episode_0'
     _, _, _, _, image_dict = load_hdf5(dataset_dir, dataset_name)

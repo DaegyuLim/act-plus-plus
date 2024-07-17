@@ -29,12 +29,14 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.img_obs_size = img_obs_size
         self.img_obs_skip = img_obs_skip
         self.cumulative_len = np.cumsum(self.episode_len)
+        print('dataset size: ', self.cumulative_len[-1])
         self.max_episode_len = max(episode_len)
         self.policy_class = policy_class
         
         self.augment_images = True
-        self.transformations = True
         self.seperate_left_right = False
+        self.img_downsample = True
+        self.img_downsample_ratio = 0.5
 
         self.img_debug = False
 
@@ -42,13 +44,14 @@ class EpisodicDataset(torch.utils.data.Dataset):
     
         self.reletive_action_mode = False
         self.reletive_obs_mode = False
+        self.relative_inter_gripper_proprio = True
 
         self.__getitem__(0) # initialize self.is_sim and self.transformations
         self.is_sim = False
         
 
-    # def __len__(self):
-    #     return sum(self.episode_len)
+    def __len__(self):
+        return self.cumulative_len[-1]
 
     def _locate_transition(self, index):
         assert index < self.cumulative_len[-1]
@@ -102,15 +105,36 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 euler = root['/observations/euler'][()]
                 
                 rotm6d = np.zeros((euler.shape[0], 0))
+                rel_xpos = np.zeros((euler.shape[0], 3))
+                rel_rotm6d = np.zeros((euler.shape[0], 6))
+
+
                 for r in range(num_robots):
                     rotation = Rotation.from_euler("ZYZ", euler[:, 3*r:3*r+3], degrees=True)
                     rotm = rotation.as_matrix()
                     rotm6d = np.concatenate( (rotm6d, rotm[:, :, 0], rotm[:, :, 1]), axis = -1)
 
                 gripper_pos = root['/observations/gripper_pos'][()]
+
+                if self.relative_inter_gripper_proprio:
+                    for t in range(euler.shape[0]):
+                        reference_ee_pos = xpos[t, 0:3]
+                        reference_ee_euler = euler[t, 0:3]
+                        reference_ee_rotation = Rotation.from_euler("ZYZ", reference_ee_euler, degrees=True)
+                        reference_ee_rotm = reference_ee_rotation.as_matrix()
+
+                        rel_xpos[t, :] = reference_ee_rotm.transpose().dot(xpos[t, 3:6] - reference_ee_pos)
+                        right_hand_rotation = Rotation.from_euler("ZYZ", euler[t, 3:6], degrees=True)
+                        rel_rotm_temp = reference_ee_rotm.transpose()*right_hand_rotation.as_matrix()
+                        rel_rotm6d[t, :] = np.concatenate( (rel_rotm_temp[:, 0], rel_rotm_temp[:, 1]), axis = -1)
+
+                    robot_state = np.concatenate( [xpos, rotm6d, rel_xpos, rel_rotm6d, gripper_pos], axis=-1)
+                else:
+                    robot_state = np.concatenate( [xpos, rotm6d, gripper_pos], axis=-1)
+                
                 t1 = time()
                 
-                robot_state = np.concatenate( [xpos, rotm6d, gripper_pos], axis=-1)
+                
                 
                 original_robot_shape = robot_state.shape
                 t2 = time()
@@ -254,62 +278,57 @@ class EpisodicDataset(torch.utils.data.Dataset):
             # channel last
             image_data = torch.einsum('k t h w c -> k t c h w', image_data)
             t8 = time()
-            # augmentation
-            if self.transformations:
+
+            if self.img_debug:
+                image_data_for_show = torch.einsum('c h w -> h w c', image_data[0, 0, :]).numpy()
+                image_data_for_show = cv2.cvtColor(image_data_for_show, cv2.COLOR_RGB2BGR)
+                # print(image_data_for_show.shape)
+                cv2.imshow('original', image_data_for_show)
+                cv2.waitKey(0)
+
+             # augmentation
+            if self.augment_images:
                 original_size = image_data.shape[3:]
                 # single_camera_size = original_size.copy()
                 # single_camera_size[1] *= 0.5
                 # print(original_size, single_camera_size)
-                ratio = 0.95
+                # ratio = 0.95
                 self.transformations = [
                     # transforms.RandomRotation(degrees=[-5.0, 5.0], expand=False),
                     # transforms.RandomCrop(size=[int(original_size[0] * ratio), int(original_size[1]/2 * ratio)]),
-                    # transforms.Resize(original_size[0]),
-                    transforms.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5, hue=0.04)
+                    transforms.v2.Resize( size = (int(original_size[0]*self.img_downsample_ratio), int(original_size[1]*self.img_downsample_ratio)) ),
+                    transforms.v2.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5, hue=0.08)
                 ]
 
-            image_data_for_show = torch.einsum('c h w -> h w c', image_data[0, 0, :]).numpy()
-            # print(image_data_for_show.shape)
-            
+                for transform in self.transformations:
+                    image_data = transform(image_data)
+
             if self.img_debug:
-                cv2.imshow('original', image_data_for_show)
+                image_data_for_show = torch.einsum('c h w -> h w c', image_data[0, 0, :]).numpy()
+                image_data_for_show = cv2.cvtColor(image_data_for_show, cv2.COLOR_RGB2BGR)
+                cv2.imshow('finally transfomed', image_data_for_show)
                 cv2.waitKey(0)
+                
+            # if self.seperate_left_right:
+            #     image_size = image_data.shape[3:]
+            #     for k in range(image_data.shape[0]):
+            #         for t in range(image_data.shape[1]):
+            #             temp_left_image = image_data[k, t, :, :, :int(image_size[1]/2)].clone()
+            #             print('temp_left_image.shape: ', temp_left_image.shape)
+            #             temp_right_image = image_data[k, t, :, :, int(image_size[1]/2):].clone()
+            #             print('temp_right_image.shape: ', temp_right_image.shape)
+    
+            #             image_data[k, t, :, :, :int(image_size[1]/2)] = temp_left_image.clone()
+            #             image_data[k, t, :, :, int(image_size[1]/2):] = temp_right_image.clone()
 
-            if self.augment_images:
-                for k in range(image_data.shape[0]):
-                    for t in range(image_data.shape[1]):
-                        if self.seperate_left_right:
-                            temp_left_image = image_data[k, t, :, :, :int(original_size[1]/2)].clone()
-                            print('temp_left_image.shape: ', temp_left_image.shape)
-                            temp_right_image = image_data[k, t, :, :, int(original_size[1]/2):].clone()
-                            print('temp_right_image.shape: ', temp_right_image.shape)
-                            for transform in self.transformations:
-                                temp_left_image = transform(temp_left_image)
-                                temp_right_image = transform(temp_right_image)
+            #             if self.img_debug:
+            #                 image_data_for_show = torch.einsum('c h w -> h w c', image_data[k, t, :]).numpy()
+            #                 cv2.imshow('finally transfomed', image_data_for_show)
+            #                 cv2.waitKey(0)
 
-                                if self.img_debug:
-                                    image_data_for_show = torch.einsum('c h w -> h w c', temp_left_image).numpy()
-                                    cv2.imshow(f'transform', image_data_for_show)
-                                    cv2.waitKey(0)
-                            image_data[k, t, :, :, :int(original_size[1]/2)] = temp_left_image.clone()
-                            image_data[k, t, :, :, int(original_size[1]/2):] = temp_right_image.clone()
-                        else:
-                            temp_image = image_data[k, t].clone()
-                            for transform in self.transformations:
-                                temp_image = transform(temp_image)
-                                if self.img_debug:
-                                    image_data_for_show = torch.einsum('c h w -> h w c', temp_image).numpy()
-                                    cv2.imshow(f'transform', image_data_for_show)
-                                    cv2.waitKey(0)
-                            image_data[k, t] = temp_image.clone()
 
-                        if self.img_debug:
-                            image_data_for_show = torch.einsum('c h w -> h w c', image_data[k, t, :]).numpy()
-                            cv2.imshow('finally transfomed', image_data_for_show)
-                            cv2.waitKey(0)
             # normalize image and change dtype to float
             image_data = image_data / 255.0
-
             if self.policy_class == 'Diffusion':
                 # normalize to [-1, 1]
                 action_data = ((action_data - self.norm_stats["action_min"]) / (self.norm_stats["action_max"] - self.norm_stats["action_min"])) * 2 - 1
@@ -345,6 +364,7 @@ def get_norm_stats(dataset_path_list):
     all_state_data = []
     all_action_data = []
     all_episode_len = []
+    relative_inter_gripper_proprio = True
 
     for dataset_path in dataset_path_list:
         try:
@@ -373,7 +393,11 @@ def get_norm_stats(dataset_path_list):
 
                 xpos = root['/observations/xpos'][()]
                 euler = root['/observations/euler'][()]
+
                 rotm6d = np.zeros((euler.shape[0], 0))
+                rel_xpos = np.zeros((euler.shape[0], 3))
+                rel_rotm6d = np.zeros((euler.shape[0], 6))
+
                 for r in range(num_robots):
                     rotation = Rotation.from_euler("ZYZ", euler[:, 3*r:3*r+3], degrees=True)
                     rotm = rotation.as_matrix()
@@ -382,8 +406,21 @@ def get_norm_stats(dataset_path_list):
                 gripper_pos = root['/observations/gripper_pos'][()]
                 t1 = time()
                 
-                state = np.concatenate( [xpos, rotm6d, gripper_pos], axis=-1)
+                if relative_inter_gripper_proprio:
+                    for t in range(euler.shape[0]):
+                        reference_ee_pos = xpos[t, 0:3]
+                        reference_ee_euler = euler[t, 0:3]
+                        reference_ee_rotation = Rotation.from_euler("ZYZ", reference_ee_euler, degrees=True)
+                        reference_ee_rotm = reference_ee_rotation.as_matrix()
 
+                        rel_xpos[t, :] = reference_ee_rotm.transpose().dot(xpos[t, 3:6] - reference_ee_pos)
+                        right_hand_rotation = Rotation.from_euler("ZYZ", euler[t, 3:6], degrees=True)
+                        rel_rotm_temp = reference_ee_rotm.transpose()*right_hand_rotation.as_matrix()
+                        rel_rotm6d[t, :] = np.concatenate( (rel_rotm_temp[:, 0], rel_rotm_temp[:, 1]), axis = -1)
+
+                    state = np.concatenate( [xpos, rotm6d, rel_xpos, rel_rotm6d, gripper_pos], axis=-1)
+                else:
+                    state = np.concatenate( [xpos, rotm6d, gripper_pos], axis=-1)
 
                 # qpos = root['/observations/qpos'][()]
                 # qvel = root['/observations/qvel'][()]
@@ -456,10 +493,13 @@ def load_data(dataset_dir_l, name_filter, camera_names, batch_size_train, batch_
     if type(dataset_dir_l) == str:
         dataset_dir_l = [dataset_dir_l]
     dataset_path_list_list = [find_all_hdf5(dataset_dir, skip_mirrored_data) for dataset_dir in dataset_dir_l]
+    dataset_path_list_list = [ [n for n in dataset_path_list if name_filter(n)] for dataset_path_list in dataset_path_list_list]
     num_episodes_0 = len(dataset_path_list_list[0])
     dataset_path_list = flatten_list(dataset_path_list_list)
     dataset_path_list = [n for n in dataset_path_list if name_filter(n)]
-    num_episodes_l = [len(dataset_path_list) for dataset_path_list in dataset_path_list_list]
+    # num_episodes_l = [len(dataset_path_list) for dataset_path_list in dataset_path_list_list]
+    
+    num_episodes_l = [len(dataset_path_list)]
     num_episodes_cumsum = np.cumsum(num_episodes_l)
 
     # obtain train test split on dataset_dir_l[0]
@@ -470,7 +510,7 @@ def load_data(dataset_dir_l, name_filter, camera_names, batch_size_train, batch_
     val_episode_ids_l = [val_episode_ids_0]
     train_episode_ids = np.concatenate(train_episode_ids_l)
     val_episode_ids = np.concatenate(val_episode_ids_l)
-    print(f'\n\nData from: {dataset_dir_l}\n- Train on {[len(x) for x in train_episode_ids_l]} episodes\n- Test on {[len(x) for x in val_episode_ids_l]} episodes\n\n')
+    print(f'\n\nData from: {dataset_dir_l}\n - Train on {[len(x) for x in train_episode_ids_l]} episodes\n- Test on {[len(x) for x in val_episode_ids_l]} episodes\n\n')
 
     # obtain normalization stats for qpos and action
     # if load_pretrain:
@@ -497,8 +537,8 @@ def load_data(dataset_dir_l, name_filter, camera_names, batch_size_train, batch_
     # construct dataset and dataloader
     train_dataset = EpisodicDataset(dataset_path_list, camera_names, norm_stats, train_episode_ids, train_episode_len, chunk_size, robot_obs_size, img_obs_size, img_obs_skip, policy_class, use_depth)
     val_dataset = EpisodicDataset(dataset_path_list, camera_names, norm_stats, val_episode_ids, val_episode_len, chunk_size, robot_obs_size, img_obs_size, img_obs_skip, policy_class, use_depth)
-    train_num_workers = (16 if os.getlogin() == 'robrosdg' else 8)
-    val_num_workers = (16 if os.getlogin() == 'robrosdg' else 8)
+    train_num_workers = (24 if os.getlogin() == 'robrosdg' else 8)
+    val_num_workers = (24 if os.getlogin() == 'robrosdg' else 8)
     print(f'Augment images: {train_dataset.augment_images}, train_num_workers: {train_num_workers}, val_num_workers: {val_num_workers}')
     train_dataloader = DataLoader(train_dataset, batch_sampler=batch_sampler_train, pin_memory=True, num_workers=train_num_workers, prefetch_factor=2)
     val_dataloader = DataLoader(val_dataset, batch_sampler=batch_sampler_val, pin_memory=True, num_workers=val_num_workers, prefetch_factor=2)
