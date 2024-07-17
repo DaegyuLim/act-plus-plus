@@ -36,7 +36,6 @@ def load_hdf5(dataset_dir, dataset_name):
 def main(args):
     dataset_dir = args['dataset_dir']
     episode_idx = args['episode_idx']
-    ismirror = args['ismirror']
     if episode_idx is None:
         index_list = get_auto_index_list(dataset_dir)
         print(f'video index_list = {index_list}')
@@ -45,10 +44,7 @@ def main(args):
             xpos, euler, gripper_pos,  action_pose, action_gripper, image_dict, compressed = load_hdf5(dataset_dir, dataset_name)
             save_videos(image_dict, DT, video_path=os.path.join(dataset_dir, dataset_name + '_video.mp4'), is_compressed=compressed)
     else:
-        if ismirror:
-            dataset_name = f'mirror_episode_{episode_idx}'
-        else:
-            dataset_name = f'episode_{episode_idx}'
+        dataset_name = f'episode_{episode_idx}'
 
         xpos, euler, gripper_pos,  action_pose, action_gripper, image_dict, compressed = load_hdf5(dataset_dir, dataset_name)
         save_videos(image_dict, DT, video_path=os.path.join(dataset_dir, dataset_name + '_video.mp4'), is_compressed=compressed)
@@ -188,5 +184,4 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_dir', action='store', type=str, help='Dataset dir.', required=True)
     parser.add_argument('--episode_idx', action='store', type=int, help='Episode index.', required=False)
-    parser.add_argument('--ismirror', action='store_true')
     main(vars(parser.parse_args()))
