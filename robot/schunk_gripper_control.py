@@ -311,6 +311,7 @@ class singleGripperControl:
         self.controller_inputs_raw = data.data
 
     def shutdown(self):
+        self.open()
         self.stop_control_loop = True
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()

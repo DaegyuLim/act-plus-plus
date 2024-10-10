@@ -142,19 +142,24 @@ class DETRVAE(nn.Module):
                     latent_input = self.latent_out_proj(vq_sample.view(-1, self.vq_class * self.vq_dim))
                 else:
                     latent_sample = torch.zeros([bs, self.latent_dim], dtype=torch.float32).to(qpos.device)
+                    # latent_sample = torch.ones([bs, self.latent_dim], dtype=torch.float32).to(qpos.device)
+                    # latent_sample = latent_sample*1.0
                     latent_input = self.latent_out_proj(latent_sample)
 
         return latent_input, probs, binaries, mu, logvar
 
-    def forward(self, qpos, image, env_state, actions=None, is_pad=None, vq_sample=None):
+    def forward(self, qpos, image, env_state, actions=None, is_pad=None, vq_sample=None, encoding_only=False):
         """
         qpos: batch, num_obs, robot_state_dim
         image: batch, num_cam, num_obs, channel, height, width
         env_state: None
         actions: batch, seq, action_dim
         """
-
+        # print(f'qpos shape: {qpos.shape}')
         latent_input, probs, binaries, mu, logvar = self.encode(qpos, actions, is_pad, vq_sample)
+        if encoding_only is True:
+            return mu, logvar
+        
         bs = qpos.shape[0]
         # cvae decoder
         if self.backbones is not None:

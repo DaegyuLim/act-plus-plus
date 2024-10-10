@@ -10,7 +10,7 @@ import time
 import threading
 from std_msgs.msg import Float32MultiArray, Float32
 from quest2ros.msg import OVR2ROSInputs, OVR2ROSHapticFeedback
-from geometry_msgs.msg import PoseStamped, Twist 
+from geometry_msgs.msg import Pose, PoseStamped, Twist, PoseArray
 import numpy as np
 from scipy.spatial.transform import Rotation
 import h5py
@@ -54,6 +54,7 @@ def main(args):
     esb_k = 0.05
     policy_update_period = 10 # tick, work without temporal ensemble
     record_data = False
+    ROS_publish_data = False
     use_depth = False
     overwrite = False
     reletive_obs_mode = False
@@ -64,6 +65,8 @@ def main(args):
     img_downsampling_size = (640, 240) #(640, 180) or (640, 240)
     use_inter_gripper_proprio_input = True
     use_gpu_for_inference = True
+    
+    inference_batch = 1
 
     num_robots = len(robot_id_list)
 
@@ -72,12 +75,24 @@ def main(args):
 
     rate = rospy.Rate(HZ)
     # rate = rospy.Rate(15)
-
+        
+    left_action_pose_publisher = rospy.Publisher('/dsr_l/ACT/pose_trajectory', PoseArray, queue_size=1)
+    right_action_pose_publisher = rospy.Publisher('/dsr_r/ACT/pose_trajectory', PoseArray, queue_size=1)
+    
+    left_action_gripper_publisher = rospy.Publisher('/dsr_l/ACT/gripper_trajectory', Float32MultiArray, queue_size=1)
+    right_action_gripper_publisher = rospy.Publisher('/dsr_r/ACT/gripper_trajectory', Float32MultiArray, queue_size=1)
+    
+    left_action_traj_msg = PoseArray()
+    right_action_traj_msg = PoseArray()
+    
+    left_gripper_traj_msg = Float32MultiArray()
+    right_gripper_traj_msg = Float32MultiArray()
+    
     # load model parameters
     ckpt_dir = args['ckpt_dir']
     # ckpt_path = os.path.join(ckpt_dir, 'policy_best.ckpt')
     ckpt_path = os.path.join(ckpt_dir, 'policy_last.ckpt')
-    # ckpt_path = os.path.join(ckpt_dir, 'policy_step_19_seed_0.ckpt')
+    # ckpt_path = os.path.join(ckpt_dir, 'policy_step_62_seed_0.ckpt')
     
     print('ckpt_path: ', ckpt_path)
     config_path = os.path.join(ckpt_dir, 'config.pkl')
@@ -108,6 +123,8 @@ def main(args):
     num_image_obs = policy_config['num_image_observations']
     image_obs_every = policy_config['image_observation_skip']
 
+    print(f'state_dim: {state_dim}')
+    
     image_obs_history = dict()
     depth_obs_history = dict()
     if reletive_obs_mode:
@@ -338,7 +355,7 @@ def main(args):
                         robot_obs_history_flat = relative_robot_obs_history.reshape([-1])
                 else:
                     robot_obs_history_flat = pre_process(robot_obs_history[:])
-                    robot_obs_history_flat = robot_obs_history_flat.reshape([-1])
+                    # robot_obs_history_flat = robot_obs_history_flat.reshape([-1])
                 
                 t1 = time.time()
                 ## CAMERA INPUT
@@ -379,25 +396,35 @@ def main(args):
 
                 all_cam_images = np.stack(all_cam_images, axis=0)
 
-                t2 = time.time()
                 # move data into GPU
                 if use_gpu_for_inference:
-                    robot_obs_history_flat = torch.from_numpy(robot_obs_history_flat).float().cuda().unsqueeze(0)
-                    cam_images = torch.from_numpy(all_cam_images / 255.0).float().cuda().unsqueeze(0)
+                    if inference_batch == 1:
+                        robot_obs_history_torch = torch.from_numpy(robot_obs_history_flat).float().cuda().unsqueeze(0)
+                        cam_images = torch.from_numpy(all_cam_images / 255.0).float().cuda().unsqueeze(0)
+                    else:
+                        robot_obs_history_torch = torch.from_numpy(robot_obs_history_flat).float().cuda().unsqueeze(0).repeat_interleave(inference_batch, dim=0)
+                        cam_images = torch.from_numpy(all_cam_images / 255.0).float().cuda().unsqueeze(0).repeat_interleave(inference_batch, dim=0)
                 else:
-                    robot_obs_history_flat = torch.from_numpy(robot_obs_history_flat).float().cpu().unsqueeze(0)
+                    robot_obs_history_torch = torch.from_numpy(robot_obs_history_flat).float().cpu().unsqueeze(0)
                     cam_images = torch.from_numpy(all_cam_images / 255.0).float().cpu().unsqueeze(0)
-                    # robot_obs_history_flat = np.expand_dims(robot_obs_history_flat, axis=0)
-                    # cam_images = np.expand_dims(all_cam_images, axis=0)
 
+                t2 = time.time()
                 # policy inference
-                all_actions = policy(robot_obs_history_flat, cam_images) # action dim: [1, chunk_size, action_dim]
+                all_actions= policy(robot_obs_history_torch, cam_images) # action dim: [1, chunk_size, action_dim]
+                is_pad = torch.zeros(inference_batch, num_queries, dtype=torch.bool)
+                mu, logvar = policy.encode(robot_obs_history_torch, all_actions, is_pad)
+                
+                t3 = time.time()
                 all_actions = all_actions.cpu().numpy()
-                all_actions = np.squeeze(all_actions, axis =0)
+                all_actions = all_actions[0]
+                # all_actions = np.squeeze(all_actions, axis =0)
                 all_actions = post_process(all_actions)
 
-                t3 = time.time()
-                # print('all_actions: \n', all_actions[:30])
+                mu_np = mu.cpu().numpy()
+                logvar_np = logvar.cpu().numpy()
+                print('mu: \n', np.linalg.norm(mu_np[0]) )
+                # print('logvar: \n', logvar[0])
+                
                 if reletive_action_mode:
                     dsr_rotation = Rotation.from_euler("ZYZ", dsr_state_euler, degrees=True)
                     dsr_state_rotm = dsr_rotation.as_matrix()
@@ -414,22 +441,30 @@ def main(args):
                         all_actions[i, 3:6] = all_actions_rotation[i].as_euler("ZYZ", degrees=True)
                 
                 # print('all_actions post: \n', all_actions)
-                # 
+                 
                 if temporal_ensemble:
+                    action_skip = 0
+                    TE_horizon = num_queries - action_skip
+                    
+                    
                     all_time_actions[t, t:t+num_queries, :] = all_actions[:]
-                    action_bottom_idx = max(t-num_queries+1, 0)
-                    actions_for_curr_step = all_time_actions[ action_bottom_idx:(t+1), t, :] # (chunk_size, action_dim)
+                    action_bottom_idx = max(t-TE_horizon+1, 0)
+                    actions_for_ensemble = all_time_actions[ action_bottom_idx:(t+1), t+action_skip, :] # (chunk_size, action_dim)
+                    
+
                     # actions_populated = np.all(actions_for_curr_step != 0, axis=1)
                     # print('actions_populated: ', actions_populated)
                     # actions_for_curr_step = actions_for_curr_step[actions_populated]
 
-                    exp_weights = np.exp( esb_k * np.arange(len(actions_for_curr_step)))
+                    exp_weights = np.exp( esb_k * np.arange(len(actions_for_ensemble)))
+                    # exp_weights = np.exp( esb_k * np.arange(len(actions_for_nnext_step)))
                     exp_weights = exp_weights / exp_weights.sum()
                     exp_weights = np.expand_dims(exp_weights, axis=1).transpose() # (1, chunk_size)
 
                     # print(actions_for_curr_step.shape)
                     # print(exp_weights.shape)
-                    action = np.sum(  exp_weights.dot(actions_for_curr_step), axis=0, keepdims=False)
+                    
+                    action = np.sum(  exp_weights.dot(actions_for_ensemble), axis=0, keepdims=False)
                 else:
                     if t%policy_update_period == 0:
                         assert policy_update_period<num_queries
@@ -451,15 +486,7 @@ def main(args):
                 #     dsr.step()
                 #     t2 = time.time()
                 
-                t4 = time.time() #
 
-                # 
-
-                # print("t1 - t0: ", t1-t0)
-                # print("t2 - t1: ", t2-t1)
-                # print("t3 - t2: ", t3-t2)
-                # print("t4 - t3: ", t4-t3)
-                # print("t4 - t0: ", t4-t0)
                 
         if rospy.is_shutdown():
             # dsr.stop()
@@ -493,10 +520,12 @@ def main(args):
         # print('dsr_desired_pose: ', dsr_desired_pose)
         # print('dsr_state_xpos: ', dsr_state_xpos)
         # print('dsr_state_euler: ', dsr_state_euler)
-        ## command robot
+        
+        ###### COMMAND ROBOT (IMPORTANT) ######
         dsr.set_action(dsr_desired_pose)
         gripper.set_action(desired_gripper_pose)
-
+        #########################################
+        
         # dsr.step() # for ROS topic publish
 
         if record_data:
@@ -514,15 +543,76 @@ def main(args):
             for cam_name in camera_names:
                 data_dict[f'/observations/images/{cam_name}'].append((image_recorder.get_images())[cam_name])
                 data_dict[f'/observations/depth_images/{cam_name}'].append((image_recorder.get_depth_images())[cam_name])
+        
         # t2 = time.time() #
         # actual_dt_history.append([t0, t1, t2])
 
         # print("tdsr - t0: ", tdsr-t0)
         # print("t1 - tdsr: ", t1-tdsr)
         # print("t2 - t1: ", t2-t1)
-        # if t2-t1>0.1:
-        #     print("DSR commad duration is too long (over 100ms)")
         
+        if ROS_publish_data:
+            
+            left_action_traj_msg = PoseArray()
+            right_action_traj_msg = PoseArray()
+            
+            for i in range(num_queries):
+                left_action_traj_msg.header.stamp = rospy.Time.now()
+                right_action_traj_msg.header.stamp = rospy.Time.now()
+                left_action_traj_msg.header.frame_id = "world"
+                right_action_traj_msg.header.frame_id = "world"
+                
+                left_pose = Pose()
+                right_pose = Pose()
+                
+                left_pose.position.x = all_actions[i, 0]*0.001 + 0.3
+                left_pose.position.y = all_actions[i, 1]*0.001
+                left_pose.position.z = all_actions[i, 2]*0.001
+                
+                right_pose.position.x = all_actions[i, 3]*0.001 - 0.3
+                right_pose.position.y = all_actions[i, 4]*0.001
+                right_pose.position.z = all_actions[i, 5]*0.001
+                
+                left_quat = rot6d2quat(all_actions[i, 6:12])
+                right_quat = rot6d2quat(all_actions[i, 12:18])
+                
+                left_pose.orientation.x = left_quat[0]
+                left_pose.orientation.y = left_quat[1]
+                left_pose.orientation.z = left_quat[2]
+                left_pose.orientation.w = left_quat[3]
+                
+                right_pose.orientation.x = right_quat[0]
+                right_pose.orientation.y = right_quat[1]
+                right_pose.orientation.z = right_quat[2]
+                right_pose.orientation.w = right_quat[3]
+                
+                left_action_traj_msg.poses.append(left_pose)
+                right_action_traj_msg.poses.append(right_pose)
+
+            left_gripper_traj_msg.data = all_actions[:, -2]
+            right_gripper_traj_msg.data = all_actions[:, -1]
+            
+            left_action_pose_publisher.publish(left_action_traj_msg)
+            right_action_pose_publisher.publish(right_action_traj_msg)
+            
+            left_action_gripper_publisher.publish(left_gripper_traj_msg)
+            right_action_gripper_publisher.publish(right_gripper_traj_msg)
+            
+        t_end = time.time() #
+
+        # 
+
+        # print("t1 - t0: ", t1-t0)
+        # print("t2 - t1: ", t2-t1)
+        # print("t4 - t3: ", t4-t3)
+        
+        # print("t3 - t2 (inference): ", t3-t2)
+        # print("t_end - t0 (total): ", t_end-t0)
+        if t_end-t0>0.05:
+            print("t3 - t2 (inference): ", t3-t2)
+            print("t_end - t0 (total): ", t_end-t0)
+            print(f"DSR commad duration {t_end-t0} is too long (over 50ms)")
+            
         rate.sleep()
         
     
@@ -657,6 +747,30 @@ def make_policy(policy_class, policy_config):
     else:
         raise NotImplementedError
     return policy
+
+def rot6d2euler(rot6d):
+    rotm_x_axis = rot6d[0:3]/np.linalg.norm(rot6d[0:3])
+    rotm_y_axis = rot6d[3:6]
+    rotm_y_axis = rotm_y_axis - np.dot(rotm_y_axis, rotm_x_axis) * rotm_x_axis
+    rotm_y_axis = rotm_y_axis/np.linalg.norm(rotm_y_axis)
+    rotm_z_axis = np.cross(rotm_x_axis, rotm_y_axis)
+    rotm_z_axis = rotm_z_axis/np.linalg.norm(rotm_z_axis)
+    rotm = np.concatenate([rotm_x_axis[:,None], rotm_y_axis[:,None], rotm_z_axis[:,None]], axis=1)
+    rotation = Rotation.from_matrix(rotm)
+    euler = rotation.as_euler("ZYZ", degrees = True)
+    return euler
+
+def rot6d2quat(rot6d):
+    rotm_x_axis = rot6d[0:3]/np.linalg.norm(rot6d[0:3])
+    rotm_y_axis = rot6d[3:6]
+    rotm_y_axis = rotm_y_axis - np.dot(rotm_y_axis, rotm_x_axis) * rotm_x_axis
+    rotm_y_axis = rotm_y_axis/np.linalg.norm(rotm_y_axis)
+    rotm_z_axis = np.cross(rotm_x_axis, rotm_y_axis)
+    rotm_z_axis = rotm_z_axis/np.linalg.norm(rotm_z_axis)
+    rotm = np.concatenate([rotm_x_axis[:,None], rotm_y_axis[:,None], rotm_z_axis[:,None]], axis=1)
+    rotation = Rotation.from_matrix(rotm)
+    quat = rotation.as_quat()
+    return quat
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
