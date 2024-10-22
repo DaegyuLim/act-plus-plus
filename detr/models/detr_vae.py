@@ -91,13 +91,13 @@ class DETRVAE(nn.Module):
 
 
     def encode(self, qpos, actions=None, is_pad=None, vq_sample=None):
-        bs = qpos.shape[0]
+        bs = qpos.shape[0] # batch size
         if self.encoder is None:
             latent_sample = torch.zeros([bs, self.latent_dim], dtype=torch.float32).to(qpos.device)
             latent_input = self.latent_out_proj(latent_sample)
             probs = binaries = mu = logvar = None
         else:
-            # cvae encoder
+            # CVAE's encoder
             is_training = actions is not None # train or val
             ### Obtain latent z from action sequence
             if is_training:

@@ -103,7 +103,7 @@ def main(args):
         #     time.sleep(1.0)
         #     images = image_recorder.get_images()
     print('Hold Master Arm Handle and wait for connection')
-    master_arms.dsrConnect(connect_delay=5.0, connect_spline_duration= 3.0)
+    master_arms.dsrConnect(connect_delay=5.0, connect_spline_duration= 5.0)
     time.sleep(5.0)
 
     print('Are you ready? Move the robot to the desired initial pose.')
@@ -285,7 +285,7 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task_name', action='store', type=str, help='Task name.', default='dsr_block_disassemble_and_sort', required=False)
+    parser.add_argument('--task_name', action='store', type=str, help='Task name.', default='dsr_block_sort_demo_head_camera', required=False)
     parser.add_argument('--episode_idx', action='store', type=int, help='Episode index.', default=None, required=False)
     main(vars(parser.parse_args())) # TODO
     # debug()
