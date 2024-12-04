@@ -8,7 +8,7 @@ import rospy
 import os
 import time
 import threading
-from std_msgs.msg import Float32MultiArray, Float32
+from std_msgs.msg import Float32MultiArray, Float32, Bool
 from quest2ros.msg import OVR2ROSInputs, OVR2ROSHapticFeedback
 from geometry_msgs.msg import Pose, PoseStamped, Twist, PoseArray
 import numpy as np
@@ -29,6 +29,14 @@ from einops import rearrange
 from robot.metaquest_teleop import drlControl
 from robot.schunk_gripper_control import gripperControl
 from robot.robot_utils import ImageRecorder
+
+from pymongo import MongoClient
+from datetime import datetime
+import base64
+from PIL import Image
+import io
+import gridfs
+
 # for single robot 
 try:
     ROBOT_ID     = rospy.get_param('/dsr/robot_id')
@@ -54,7 +62,7 @@ def main(args):
     esb_k = 0.05
     policy_update_period = 10 # tick, work without temporal ensemble
     record_data = False
-    ROS_publish_data = False
+    ROS_publish_data = True
     use_depth = False
     overwrite = False
     reletive_obs_mode = False
@@ -71,8 +79,8 @@ def main(args):
     ### Experiment Parameters
     dsr_pose_action_skip = 0
     gripper_action_skip = 0
-    record_snapshot = True
-    img_name = 'test'
+    record_snapshot = False
+    img_name = 'test2'
     
     num_robots = len(robot_id_list)
 
@@ -93,6 +101,9 @@ def main(args):
     
     left_gripper_traj_msg = Float32MultiArray()
     right_gripper_traj_msg = Float32MultiArray()
+    
+    data_collect_call_publisher = rospy.Publisher('/data_collect_call', Bool, queue_size = 1)
+    data_collect_call = Bool()
     
     # load model parameters
     ckpt_dir = args['ckpt_dir']
@@ -161,19 +172,12 @@ def main(args):
         '/observations/euler': [],
         '/observations/gripper_pos': [],
         '/actions/pose': [],
-        '/actions/gripper_pos': [],
-        '/all_actions/left_pos_traj': [],
-        '/all_actions/right_pos_traj': [],
-        '/all_actions/left_quat_traj': [],
-        '/all_actions/right_quat_traj': [],
-        '/all_actions/left_gripper_pos_traj': [],
-        '/all_actions/right_gripper_pos_traj': [],
+        '/actions/gripper_pos': []
     }
     
     for cam_name in camera_names:
         data_dict[f'/observations/images/{cam_name}'] = []
-        if use_depth:
-            data_dict[f'/observations/depth_images/{cam_name}'] = []
+        data_dict[f'/observations/depth_images/{cam_name}'] = []
 
 
     images = dict()
@@ -219,6 +223,16 @@ def main(args):
     dsr_state_euler = dsr.get_euler()
     gripper_state = gripper.get_state()
 
+    
+    # MONGODB initialize
+    client = MongoClient("mongodb://192.168.0.99:27017/")
+    
+    db = client["test_database"]
+    collection = db["test_collection"]
+    fs = gridfs.GridFS(db) 
+    
+    
+    
     if use_rotm6d is True:
         dsr_state_rotm6d = np.zeros(0)
         for r in range(num_robots):
@@ -296,10 +310,16 @@ def main(args):
     time0 = time.time()
     for t in tqdm(range(max_timesteps)):
         t0 = time.time() #
-        dsr_state_xpos = dsr.get_xpos()
-        dsr_state_euler = dsr.get_euler()
-        gripper_state = gripper.get_state()
+
+
         
+        ######### MongoDB CODE ##################
+        ### Save below variables
+        # dsr_state_xpos = dsr.get_xpos()
+        # dsr_state_euler = dsr.get_euler()
+        # gripper_state = gripper.get_state()
+        #########################################
+    
         dsr_state_rotm6d = np.zeros(0)
         for r in range(num_robots):
             dsr_state_rotation = Rotation.from_euler("ZYZ", dsr_state_euler[3*r:3*r+3], degrees=True)
@@ -551,35 +571,75 @@ def main(args):
         # print('dsr_state_euler: ', dsr_state_euler)
         
         ###### COMMAND ROBOT (IMPORTANT) ######
-        dsr.set_action(dsr_desired_pose)
-        gripper.set_action(desired_gripper_pose)
+        ##### dsr.set_action(dsr_desired_pose)
+        ##### gripper.set_action(desired_gripper_pose)
         #########################################
         
         # dsr.step() # for ROS topic publish
 
-        if record_data:
-            # dsr_action = dsr.get_action()
-            # gripper_action = gripper.get_action()
-            # print('dsr_action: ', dsr_action)
-            # print('gripper_action: ', gripper_action)
+            
+        # dsr_state_xpos = dsr.get_xpos()
+        # dsr_state_euler = dsr.get_euler()
+        # gripper_state = gripper.get_state()
+        # current_time = datetime.now()
+                
+        # time_MD_1 = time.time()
+        # record_data = {
+        #     "dsr_state_xpos": dsr_state_xpos.tolist(),
+        #     "dsr_state_euler": dsr_state_euler.tolist(),
+        #     "gripper_state": gripper_state.tolist(),
+        #     "timestamp": current_time  # 현재 시간 추가
+        # }
+        
+        # time_MD_2 = time.time()
+        # # 카메라 이미지 및 깊이 이미지를 GridFS에 저장
+        # for cam_name in camera_names:
+        #     # 각 카메라에서 이미지 및 깊이 이미지 얻기
+        #     image = (image_recorder.get_images())[cam_name]  # RGB 이미지
+            
+        #     time_MD_img = time.time()
+        #     # 이미지가 None이 아닐 경우 GridFS에 저장
+        #     if image is not None:
+        #         # 이미지를 바이너리 데이터로 변환 (PIL Image 사용)
+        #         image_pil = Image.fromarray(image)  # Numpy 배열을 PIL Image로 변환
+        #         byte_arr = io.BytesIO()
+        #         image_pil.save(byte_arr, format='JPEG')  # 이미지를 JPEG 형식으로 저장
+        #         byte_arr.seek(0)  # 바이너리 데이터 스트림의 시작으로 이동
+                
+        #         # GridFS에 저장
+        #         file_id = fs.put(byte_arr, filename=f"{cam_name}_image", content_type="image/jpeg")
+                
+        #         # 이미지의 GridFS ID를 record_data에 추가
+        #         record_data[f'/observations/images/{cam_name}'] = file_id
+        #         # record_data[f'/observations/images/{cam_name}'] = image.tolist() ## image size is too large to save
+        #     else:
+        #         print(f"Warning: Image for camera {cam_name} is None!")
+        #     time_MD_img_2 = time.time()
+        # # MongoDB에 record_data 저장 (GridFS ID 포함)
+        # time_MD_3 = time.time()
+        # collection.insert_one(record_data) 
+        # time_MD_4 = time.time()
 
-            data_dict['/observations/xpos'].append(dsr_state_xpos)
-            data_dict['/observations/euler'].append(dsr_state_euler)
-            data_dict['/observations/gripper_pos'].append(gripper_state)
-            data_dict['/actions/pose'].append(dsr_desired_pose)
-            data_dict['/actions/gripper_pos'].append(desired_gripper_pose)
+        # print(f"state save time: {time_MD_2 - time_MD_1}")
+        # print(f"image save time: {time_MD_3 - time_MD_2}")
+        # print(f"data upload time: {time_MD_4- time_MD_3}")
+        # print(f"single img save time: {time_MD_img_2 - time_MD_img}")
+        # if record_data:
+        #     dsr_action = dsr.get_action()
+        #     gripper_action = gripper.get_action()
+        #     # print('dsr_action: ', dsr_action)
+        #     # print('gripper_action: ', gripper_action)
             
-            data_dict['/all_actions/left_pos_traj'].append(all_actions[:, 0:3])
-            data_dict['/all_actions/right_pos_traj'].append(all_actions[:, 3:6])
-            data_dict['/all_actions/left_quat_traj'].append(rot6d2quat(all_actions[:, 6:12]))
-            data_dict['/all_actions/right_quat_traj'].append(rot6d2quat(all_actions[:, 12:18]))
-            data_dict['/all_actions/left_gripper_pos_traj'].append(all_actions[:, -2])
-            data_dict['/all_actions/right_gripper_pos_traj'].append(all_actions[:, -1])
-            
-            for cam_name in camera_names:
-                data_dict[f'/observations/images/{cam_name}'].append((image_recorder.get_images())[cam_name])
-                if use_depth:
-                    data_dict[f'/observations/depth_images/{cam_name}'].append((image_recorder.get_depth_images())[cam_name])
+
+        #     data_dict['/observations/xpos'].append(dsr_state_xpos)
+        #     data_dict['/observations/euler'].append(dsr_state_euler)
+        #     data_dict['/observations/gripper_pos'].append(gripper_state)
+        #     data_dict['/actions/pose'].append(dsr_action)
+        #     data_dict['/actions/gripper_pos'].append(gripper_action)
+
+        #     for cam_name in camera_names:
+        #         data_dict[f'/observations/images/{cam_name}'].append((image_recorder.get_images())[cam_name])
+        #         data_dict[f'/observations/depth_images/{cam_name}'].append((image_recorder.get_depth_images())[cam_name])
         
         # t2 = time.time() #
         # actual_dt_history.append([t0, t1, t2])
@@ -589,8 +649,6 @@ def main(args):
         # print("t2 - t1: ", t2-t1)
         
         if ROS_publish_data:
-            
-            
             left_action_traj_msg = PoseArray()
             right_action_traj_msg = PoseArray()
             
@@ -636,6 +694,9 @@ def main(args):
             left_action_gripper_publisher.publish(left_gripper_traj_msg)
             right_action_gripper_publisher.publish(right_gripper_traj_msg)
             
+            data_collect_call.data = True
+            data_collect_call_publisher.publish(data_collect_call)
+            
         t_end = time.time() #
 
         # 
@@ -674,14 +735,14 @@ def main(args):
             t0 = time.time()
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50] # tried as low as 20, seems fine
             compressed_image_len = []
-            # compressed_depth_len = []
+            compressed_depth_len = []
             for cam_name in camera_names:
                 image_list = data_dict[f'/observations/images/{cam_name}']
-                # depth_list = data_dict[f'/observations/depth_images/{cam_name}']
+                depth_list = data_dict[f'/observations/depth_images/{cam_name}']
                 compressed_list = []
-                # compressed_depth_list = []
+                compressed_depth_list = []
                 compressed_image_len.append([])
-                # compressed_depth_len.append([])
+                compressed_depth_len.append([])
                 
                 for image in image_list:
                     result, encoded_image = cv2.imencode('.jpg', image, encode_param) # 0.02 sec # cv2.imdecode(encoded_image, 1)
@@ -689,25 +750,20 @@ def main(args):
                     compressed_image_len[-1].append(len(encoded_image))
                     if result == False:
                         print('Error during image compression')
+                for depth in depth_list:
+                    result, encoded_depth = cv2.imencode('.jpg', depth, encode_param) # 0.02 sec # cv2.imdecode(encoded_image, 1)
+                    compressed_depth_list.append(encoded_depth)
+                    compressed_depth_len[-1].append(len(encoded_depth))
+                    if result == False:
+                        print('Error during depth image compression')
                 data_dict[f'/observations/images/{cam_name}'] = compressed_list
-                
-                # if use_depth:
-                #     for depth in depth_list:
-                #         result, encoded_depth = cv2.imencode('.jpg', depth, encode_param) # 0.02 sec # cv2.imdecode(encoded_image, 1)
-                #         compressed_depth_list.append(encoded_depth)
-                #         compressed_depth_len[-1].append(len(encoded_depth))
-                #         if result == False:
-                #             print('Error during depth image compression')
-                    
-                #     data_dict[f'/observations/depth_images/{cam_name}'] = compressed_depth_list
-                
-                
+                data_dict[f'/observations/depth_images/{cam_name}'] = compressed_depth_list
             print(f'compression: {time.time() - t0:.2f}s')
 
             # pad so it has same length
             t0 = time.time()
             compressed_image_len = np.array(compressed_image_len)
-            
+            compressed_depth_len = np.array(compressed_depth_len)
 
             padded_size = compressed_image_len.max()
             for cam_name in camera_names:
@@ -720,18 +776,16 @@ def main(args):
                     padded_compressed_image_list.append(padded_compressed_image)
                 data_dict[f'/observations/images/{cam_name}'] = padded_compressed_image_list
 
-            if use_depth:
-                compressed_depth_len = np.array(compressed_depth_len)
-                padded_size2 = compressed_depth_len.max()
-                for cam_name in camera_names:
-                    compressed_depth_list = data_dict[f'/observations/depth_images/{cam_name}']
-                    padded_compressed_depth_list = []
-                    for compressed_depth in compressed_depth_list:
-                        padded_compressed_depth = np.zeros(padded_size2, dtype='uint8')
-                        depth_len = len(compressed_depth)
-                        padded_compressed_depth[:depth_len] = compressed_depth
-                        padded_compressed_depth_list.append(padded_compressed_depth)
-                    data_dict[f'/observations/depth_images/{cam_name}'] = padded_compressed_depth_list
+            padded_size2 = compressed_depth_len.max()
+            for cam_name in camera_names:
+                compressed_depth_list = data_dict[f'/observations/depth_images/{cam_name}']
+                padded_compressed_depth_list = []
+                for compressed_depth in compressed_depth_list:
+                    padded_compressed_depth = np.zeros(padded_size2, dtype='uint8')
+                    depth_len = len(compressed_depth)
+                    padded_compressed_depth[:depth_len] = compressed_depth
+                    padded_compressed_depth_list.append(padded_compressed_depth)
+                data_dict[f'/observations/depth_images/{cam_name}'] = padded_compressed_depth_list
             print(f'padding: {time.time() - t0:.2f}s')
 
         # HDF5
@@ -742,62 +796,43 @@ def main(args):
             obs = root.create_group('observations')
             actions = root.create_group('actions')
             image = obs.create_group('images')
-            
-            all_actions = root.create_group('all_actions')
-            _ = all_actions.create_dataset('left_pos_traj', (max_timesteps, num_queries, 3))
-            _ = all_actions.create_dataset('right_pos_traj', (max_timesteps, num_queries, 3))
-            _ = all_actions.create_dataset('left_quat_traj', (max_timesteps, num_queries, 4))
-            _ = all_actions.create_dataset('right_quat_traj', (max_timesteps, num_queries, 4))
-            _ = all_actions.create_dataset('left_gripper_pos_traj', (max_timesteps, num_queries))
-            _ = all_actions.create_dataset('right_gripper_pos_traj', (max_timesteps, num_queries))
-            
-            # depth = obs.create_group('depth_images')
-            
+            depth = obs.create_group('depth_images')
             for cam_name in camera_names:
                 if COMPRESS:
                     _ = image.create_dataset(cam_name, (max_timesteps, padded_size), dtype='uint8',
                                             chunks=(1, padded_size), )
-                    # if use_depth:
-                    #     _ = depth.create_dataset(cam_name, (max_timesteps, padded_size2), dtype='uint8',
-                    #                             chunks=(1, padded_size2), )
+                    if use_depth:
+                        _ = depth.create_dataset(cam_name, (max_timesteps, padded_size2), dtype='uint8',
+                                                chunks=(1, padded_size2), )
                 else:
                     _ = image.create_dataset(cam_name, (max_timesteps, images_size[cam_name][0], images_size[cam_name][1], images_size[cam_name][2]), dtype='uint8',
                                             chunks=(1, images_size[cam_name][0], images_size[cam_name][1], images_size[cam_name][2]), )
-                    # if use_depth:
-                    #     _ = depth.create_dataset(cam_name, (max_timesteps, 480, 640), dtype='uint8',
-                    #                             chunks=(1, 480, 640, 1), )
-            _ = obs.create_dataset('xpos', (max_timesteps, 6))
-            _ = obs.create_dataset('euler', (max_timesteps, 6))
-            _ = obs.create_dataset('gripper_pos', (max_timesteps, 2))
-            _ = actions.create_dataset('pose', (max_timesteps, 12))
-            _ = actions.create_dataset('gripper_pos', (max_timesteps, 2))
+                    if use_depth:
+                        _ = depth.create_dataset(cam_name, (max_timesteps, 480, 640), dtype='uint8',
+                                                chunks=(1, 480, 640, 1), )
+            _ = obs.create_dataset('xpos', (max_timesteps, 3))
+            _ = obs.create_dataset('euler', (max_timesteps, 3))
+            _ = obs.create_dataset('gripper_pos', (max_timesteps, 1))
+            _ = actions.create_dataset('pose', (max_timesteps, 6))
+            _ = actions.create_dataset('gripper_pos', (max_timesteps, 1))
 
             for name, array in data_dict.items():
-                print(f'name: {name}')
                 root[name][...] = array
 
             if COMPRESS:
                 _ = root.create_dataset('compressed_image_len', (len(camera_names), max_timesteps))
                 root['/compressed_image_len'][...] = compressed_image_len
-                # if use_depth:
-                #     _ = root.create_dataset('compressed_depth_len', (len(camera_names), max_timesteps))
-                #     root['/compressed_depth_len'][...] = compressed_depth_len
-
-        # save all actions data
-        with open(os.path.join(dataset_dir, 'left_gripper_pos_traj') + '.txt', 'w') as f:
-            # Write each numpy array to the file
-            # for array in [array1, array2, array3]:
-            # Write array as a space-separated string
-            np.savetxt(f, data_dict['/all_actions/left_gripper_pos_traj'], fmt='%f')  # %d is for integer format, change to %f for floating-point
-            # f.write('\n')  # Add a newline between arrays
-        with open(os.path.join(dataset_dir, 'right_gripper_pos_traj') + '.txt', 'w') as f:
-            # Write each numpy array to the file
-            # for array in [array1, array2, array3]:
-            # Write array as a space-separated string
-            np.savetxt(f, data_dict['/all_actions/right_gripper_pos_traj'], fmt='%f')  # %d is for integer format, change to %f for floating-point
-            # f.write('\n')  # Add a newline between arrays
+                if use_depth:
+                    _ = root.create_dataset('compressed_depth_len', (len(camera_names), max_timesteps))
+                    root['/compressed_depth_len'][...] = compressed_depth_len
 
         print(f'Saving: {time.time() - t0:.1f} secs')
+
+
+# 이미지 데이터를 Base64로 인코딩하여 문자열로 반환
+def image_to_base64(image):
+
+    return base64.b64encode(image).decode('utf-8')
 
 def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
     max_idx = 1000
@@ -832,34 +867,16 @@ def rot6d2euler(rot6d):
     return euler
 
 def rot6d2quat(rot6d):
-    rot6d_size = rot6d.shape
-    # print(f'rot6d_size: {rot6d_size}')
-    if rot6d_size[0] == 6:
-        rotm_x_axis = rot6d[0:3]/np.linalg.norm(rot6d[0:3])
-        rotm_y_axis = rot6d[3:6]
-        rotm_y_axis = rotm_y_axis - np.dot(rotm_y_axis, rotm_x_axis) * rotm_x_axis
-        rotm_y_axis = rotm_y_axis/np.linalg.norm(rotm_y_axis)
-        rotm_z_axis = np.cross(rotm_x_axis, rotm_y_axis)
-        rotm_z_axis = rotm_z_axis/np.linalg.norm(rotm_z_axis)
-        rotm = np.concatenate([rotm_x_axis[:,None], rotm_y_axis[:,None], rotm_z_axis[:,None]], axis=1)
-        rotation = Rotation.from_matrix(rotm)
-        quat = rotation.as_quat()
-    elif rot6d_size[0] == 24:
-        quat = np.zeros((24, 4), dtype=np.float32)
-        for i in range(24):
-            rotm_x_axis = rot6d[i, 0:3]/np.linalg.norm(rot6d[i, 0:3])
-            rotm_y_axis = rot6d[i, 3:6]
-            rotm_y_axis = rotm_y_axis - np.dot(rotm_y_axis, rotm_x_axis) * rotm_x_axis
-            rotm_y_axis = rotm_y_axis/np.linalg.norm(rotm_y_axis)
-            rotm_z_axis = np.cross(rotm_x_axis, rotm_y_axis)
-            rotm_z_axis = rotm_z_axis/np.linalg.norm(rotm_z_axis)
-            rotm = np.concatenate([rotm_x_axis[:,None], rotm_y_axis[:,None], rotm_z_axis[:,None]], axis=1)
-            rotation = Rotation.from_matrix(rotm)
-            quat[i] = rotation.as_quat()
-    else:
-        raise TypeError("Input must be a quaternion or quaternion array.") 
+    rotm_x_axis = rot6d[0:3]/np.linalg.norm(rot6d[0:3])
+    rotm_y_axis = rot6d[3:6]
+    rotm_y_axis = rotm_y_axis - np.dot(rotm_y_axis, rotm_x_axis) * rotm_x_axis
+    rotm_y_axis = rotm_y_axis/np.linalg.norm(rotm_y_axis)
+    rotm_z_axis = np.cross(rotm_x_axis, rotm_y_axis)
+    rotm_z_axis = rotm_z_axis/np.linalg.norm(rotm_z_axis)
+    rotm = np.concatenate([rotm_x_axis[:,None], rotm_y_axis[:,None], rotm_z_axis[:,None]], axis=1)
+    rotation = Rotation.from_matrix(rotm)
+    quat = rotation.as_quat()
     return quat
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

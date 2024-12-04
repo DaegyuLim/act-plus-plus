@@ -26,8 +26,8 @@ TASK_CONFIGS = {
         'name_filter': lambda n: 'sort_only' in n,
     },
     'dsr_block_sort_demo_head_camera':{
-        'dataset_dir': DATA_DIR + '/dsr_block_sort_demo_head_camera/for_AI_DAY_video',
-        'episode_len': 15000,
+        'dataset_dir': DATA_DIR + '/dsr_block_sort_demo_head_camera/save_inference_data',
+        'episode_len': 10000,
         'train_ratio': 0.99,
         'camera_names': ['lhand_camera', 'rhand_camera', 'head_camera'],
         'robot_id_list': ['dsr_l', 'dsr_r']
