@@ -225,7 +225,11 @@ def main(args):
 
     
     # MONGODB initialize
+<<<<<<< HEAD
     client = MongoClient("mongodb://localhost:27017/")
+=======
+    client = MongoClient("mongodb://192.168.0.99:27017/")
+>>>>>>> e2842d20f6c5de26e0cc64264f74fe47da503fdc
     
     db = client["test_database"]
     collection = db["test_collection"]
