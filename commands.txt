@@ -1,0 +1,13 @@
+python train.py \
+--ckpt_dir ./ckpt/dsr_block_dnq/test \
+--policy_class ACT \
+--task_name dsr_block_disassemble_and_sort \
+--batch_size 28 \
+--chunk_size 40 \
+--robot_obs_size 2 \
+--img_obs_size 2 \
+--img_obs_every 2 \
+--seed 0 \
+--num_steps 100000 \
+--lr 1e-5 \
+--wandb
