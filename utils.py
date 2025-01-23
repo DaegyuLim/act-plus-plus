@@ -663,9 +663,9 @@ def BatchSampler(batch_size, episode_len_l, sample_weights):
     sum_dataset_len_l = np.cumsum(
         [0] + [np.sum(episode_len) for episode_len in episode_len_l]
     )
-    print(f'len(episode_len_l) = {len(episode_len_l)}')
+    # print(f'len(episode_len_l) = {len(episode_len_l)}')
     # print(f'episode_len_l = {episode_len_l}')
-    print(f'sample_probs = {sample_probs}')
+    # print(f'sample_probs = {sample_probs}')
     while True:
         batch = []
         for _ in range(batch_size):

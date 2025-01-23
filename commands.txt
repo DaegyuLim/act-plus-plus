@@ -1,4 +1,4 @@
-python imitate_episodes.py \
+python train.py \
 --ckpt_dir ./ckpt/dsr_block_sort_demo_head_camera/resume_simple_chunk_24_obs_2_img_2_evr_20_batch_16_resnet_34_lr_1e-5_1e-4_epi_850_seed_0 \
 --policy_class ACT \
 --task_name dsr_block_sort_demo_head_camera \
@@ -14,7 +14,7 @@ python imitate_episodes.py \
 --wandb
 
 
-python imitate_episodes.py \
+python train.py \
 --ckpt_dir ./ckpt/dsr_block_sort_demo_head_camera/test \
 --policy_class ACT \
 --task_name dsr_block_sort_demo_head_camera \
@@ -30,7 +30,7 @@ python imitate_episodes.py \
 
 
 # image test
-python imitate_episodes.py \
+python train.py \
 --ckpt_dir ./ckpt/dsr_block_sort_demo_head_camera/test \
 --policy_class ACT \
 --task_name dsr_block_sort_demo_head_camera \
