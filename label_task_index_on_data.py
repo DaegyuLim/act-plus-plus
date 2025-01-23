@@ -22,7 +22,6 @@ for line in lines:
 
 
 
-
 df = pd.read_excel(file_path)
 df = df.drop(columns=['contime'])       # 초 단위로 표현한 셀 삭제
 df_cleaned = df.dropna()
