@@ -1,0 +1,14 @@
+torchvision
+torch
+pyquaternion
+pyyaml
+rospkg
+pexpect
+opencv-python
+matplotlib
+einops
+packaging
+h5py
+ipython
+scipy
+wandb

@@ -1,18 +1,16 @@
 # Imitation Learning algorithms and Co-training for Mobile ALOHA
 
 
-#### Project Website: https://mobile-aloha.github.io/
+#### Reference Project Website: https://mobile-aloha.github.io/
 
-This repo contains the implementation of ACT, Diffusion Policy and VINN, together with 2 simulated environments:
-Transfer Cube and Bimanual Insertion. You can train and evaluate them in sim or real.
-For real, you would also need to install [Mobile ALOHA](https://github.com/MarkFzp/mobile-aloha). This repo is forked from the [ACT repo](https://github.com/tonyzhaozh/act).
+This repo contains the implementation of ACT:
+This repo is forked from the [ACT repo](https://github.com/tonyzhaozh/act).
 
 ### Updates:
-You can find all scripted/human demo for simulated environments [here](https://drive.google.com/drive/folders/1gPR03v05S1xiInoVJn7G7VJ9pDCnxq9O?usp=share_link).
 
 
 ### Repo Structure
-- ``imitate_episodes.py`` Train and Evaluate ACT
+- ``train.py`` Train and Evaluate ACT
 - ``policy.py`` An adaptor for ACT policy
 - ``detr`` Model definitions of ACT, modified from DETR
 - ``sim_env.py`` Mujoco + DM_Control environments with joint space control
@@ -25,22 +23,9 @@ You can find all scripted/human demo for simulated environments [here](https://d
 
 ### Installation
 
-    conda create -n aloha python=3.8.10
-    conda activate aloha
-    pip install torchvision
-    pip install torch
-    pip install pyquaternion
-    pip install pyyaml
-    pip install rospkg
-    pip install pexpect
-    pip install opencv-python
-    pip install matplotlib
-    pip install einops
-    pip install packaging
-    pip install h5py
-    pip install ipython
-    pip install scipy
-    pip install wandb
+    conda create -n act python=3.8.10
+    conda activate act
+    pip install -r requirements.txt 
     cd act/detr && pip install -e .
 
 for usage of GPT server first time
@@ -52,22 +37,9 @@ for usage of GPT server first time
 
 To set up a new terminal, run:
 
-    conda activate aloha
+    conda activate act
     cd <path to act repo>
 
-### Simulated experiments (LEGACY table-top ALOHA environments)
-
-We use ``sim_transfer_cube_scripted`` task in the examples below. Another option is ``sim_insertion_scripted``.
-To generated 50 episodes of scripted data, run:
-
-    python3 record_sim_episodes.py --task_name sim_transfer_cube_scripted --dataset_dir <data save dir> --num_episodes 50
-
-To can add the flag ``--onscreen_render`` to see real-time rendering.
-To visualize the simulated episodes after it is collected, run
-
-    python3 visualize_episodes.py --dataset_dir <data save dir> --episode_idx 0
-
-Note: to visualize data from the mobile-aloha hardware, use the visualize_episodes.py from https://github.com/MarkFzp/mobile-aloha
 
 To train ACT:
     
