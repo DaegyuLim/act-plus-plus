@@ -66,7 +66,7 @@ def main(args):
     trained_on_gpu_server = False
     use_rotm6d = True
     img_downsampling = True
-    img_downsampling_size = (640, 180)
+    img_downsampling_size = (640, 240) #(640, 180) or (640, 240)
     use_inter_gripper_proprio_input = True
     use_gpu_for_inference = True
 
@@ -258,6 +258,9 @@ def main(args):
         # first_image_for_show = cv2.cvtColor(first_image, cv2.COLOR_RGB2BGR)
         # cv2.imshow('first_image', first_image_for_show)
         # cv2.waitKey(0)
+        if cam_name == 'head_camera':
+            first_image = first_image[140:-100, :].copy() # crop height
+            
         if img_downsampling:
             first_image = cv2.resize(
                 first_image, dsize=img_downsampling_size, interpolation=cv2.INTER_LINEAR
@@ -397,6 +400,9 @@ def main(args):
                 ## CAMERA INPUT
                 for cam_name in camera_names:
                     current_image = image_recorder.get_images()[cam_name]
+                    if cam_name == 'head_camera':
+                        current_image = current_image[140:-100, :].copy() # crop height
+                        
                     if img_downsampling:
                         current_image = cv2.resize(
                             current_image,
@@ -668,7 +674,8 @@ def main(args):
     # shutdown controllers
     # dsr.shutdown()
     # gripper.shutdown()
-
+    print(f'Avg Control Frequency [Hz]: {dsr.dsr_list[0].tick / (time.time() - time0)}')
+    
     if record_data:
         COMPRESS = True
 

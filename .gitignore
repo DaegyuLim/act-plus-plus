@@ -7,6 +7,7 @@ data_local
 .vscode
 _wandb
 ckpt
+MongoDB
 
 **/.DS_Store
 

@@ -101,15 +101,15 @@ class dsrMasterArmCore:
         self.groupSyncTorqueWrite = GroupSyncWrite(self.portHandler, self.packetHandler, DXL_GOAL_TORQUE_ADDR, LEN_GOAL_TORQUE)
 
         if self.portHandler.openPort():
-            print("Succeeded to open the port")
+            print(f"[{self.robot_id}] Succeeded to open the port")
         else:
-            print("Failed to open the port")
+            print(f"[{self.robot_id}] Failed to open the port")
             quit()
 
         if self.portHandler.setBaudRate(BAUDRATE):
-            print("Succeeded to change the baudrate")
+            print(f"[{self.robot_id}] Succeeded to change the baudrate")
         else:
-            print("Failed to change the baudrate")
+            print(f"[{self.robot_id}] Failed to change the baudrate")
             quit()
 
         for dxl_id in range(1, NUM_JOINTS+1):
@@ -225,9 +225,9 @@ class dsrMasterArmCore:
             self.connect_start_delay = min(connect_delay, 100)
             self.connect_spline_duration = min(connect_spline_duration, 100)
 
-            self.connect_init_pose[0] = self.dsr_hand_pose_raw.pose.position.x*1e-3 ## [mm] to [m]
-            self.connect_init_pose[1] = self.dsr_hand_pose_raw.pose.position.y*1e-3
-            self.connect_init_pose[2] = self.dsr_hand_pose_raw.pose.position.z*1e-3
+            self.connect_init_pose[0] = self.dsr_hand_pose_raw.pose.position.x
+            self.connect_init_pose[1] = self.dsr_hand_pose_raw.pose.position.y
+            self.connect_init_pose[2] = self.dsr_hand_pose_raw.pose.position.z
 
             self.connect_init_pose[3] = self.dsr_hand_pose_raw.pose.orientation.x
             self.connect_init_pose[4] = self.dsr_hand_pose_raw.pose.orientation.y

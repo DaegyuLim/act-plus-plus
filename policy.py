@@ -271,6 +271,10 @@ class ACTPolicy(nn.Module):
             # return a_hat, is_pad_hat
             return a_hat
 
+    def encode(self, robot_state, actions, is_pad):
+        mu, logvar = self.model(robot_state, None, None, actions, is_pad, None, encoding_only=True)
+        return mu, logvar
+        
     def configure_optimizers(self):
         return self.optimizer
 

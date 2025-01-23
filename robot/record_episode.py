@@ -7,6 +7,9 @@
 import rospy
 import os
 import time
+import sys
+import select
+import termios
 import threading
 # from std_msgs.msg import Float32MultiArray, Float32
 # from quest2ros.msg import OVR2ROSInputs, OVR2ROSHapticFeedback
@@ -24,6 +27,19 @@ from schunk_gripper_control import gripperControl
 from robot_utils import ImageRecorder
 from dxl_master_arm import dsrMasterArm
 
+def set_cbreak(fd):
+    # Save old terminal settings
+    old_settings = termios.tcgetattr(fd)
+    # Put terminal into cbreak mode: unbuffered, no echo, etc.
+    new_settings = old_settings[:]
+    new_settings[3] = (new_settings[3] & ~termios.ICANON & ~termios.ECHO)
+    termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
+    return old_settings
+
+def restore_terminal(fd, old_settings):
+    # Restore old terminal settings
+    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    
 # for single robot 
 
 
@@ -75,7 +91,9 @@ def main(args):
         '/observations/euler': [],
         '/observations/gripper_pos': [],
         '/actions/pose': [],
-        '/actions/gripper_pos': []
+        '/actions/gripper_pos': [],
+        '/rewards/task': [],
+        '/labels/task_done': [],
     }
     for cam_name in camera_names:
         data_dict[f'/observations/images/{cam_name}'] = []
@@ -85,7 +103,12 @@ def main(args):
     images = dict()
     # depth_images = dict()
     actual_dt_history = []
-
+    
+    old_settings = set_cbreak(sys.stdin.fileno())
+    last_input = None
+    task_reward = 0
+    task_done = False
+    
     # check cameara streaming
     for cam_name in camera_names:
         images = image_recorder.get_images()
@@ -120,15 +143,42 @@ def main(args):
     time0 = time.time()
     for t in tqdm(range(max_timesteps)):
         t0 = time.time() #
-        # dsr.step()
         tdsr = time.time() #
-        # gripper.step()
         t1 = time.time() #
+        
         dsr_action = dsr.get_action()
         dsr_state_xpos = dsr.get_xpos()
         dsr_state_euler = dsr.get_euler()
         gripper_action = gripper.get_action()
         gripper_state = gripper.get_state()
+
+        
+        ############# read foot switch input##############
+        rlist, _, _ = select.select([sys.stdin], [], [], 0)
+        if rlist:  # If stdin is ready
+            # read the line (non-blocking)
+            key_input = sys.stdin.read(1)
+            if key_input:
+                if last_input != key_input:
+                    if key_input == 'q':
+                        task_done = True
+                    elif key_input == 'r':
+                        task_reward = 1
+                    elif key_input == 'p':
+                        task_reward = -1
+                else:
+                    task_reward = 0
+                    task_done = False
+                    
+                last_input = key_input
+                # print(f"Received input: {key_input}")
+                # print(f"task_reward: {task_reward}")
+                # print(f"task_done: {task_done}")
+        else:
+            last_input = None      
+            task_reward = 0
+            task_done = False  
+        ##################################################
 
         # print('dsr_action: ', dsr_action, dsr_action.shape)
         # print('dsr_state_xpos: ', dsr_state_xpos, dsr_state_xpos.shape)
@@ -146,7 +196,10 @@ def main(args):
             data_dict[f'/observations/images/{cam_name}'].append((image_recorder.get_images())[cam_name])
             # data_dict[f'/observations/depth_images/{cam_name}'].append((image_recorder.get_depth_images())[cam_name])
             # print(f'{cam_name} size = {image_recorder.get_images()[cam_name].shape}')
-
+        
+        data_dict['/rewards/task'].append([task_reward])
+        data_dict['/labels/task_done'].append([task_done])
+        
         t2 = time.time() #
         actual_dt_history.append([t0, t1, t2])
 
@@ -156,15 +209,20 @@ def main(args):
         if tdsr-t0>0.1:
             print("DSR commad duration is too long (over 100ms)")
 
-        if rospy.is_shutdown():
-            dsr.stop()
-            gripper.open()
-            dsr.control_thread_stop()
-            gripper.control_thread_stop()
-            return
+        
+        if rospy.is_shutdown() or task_done:
+            # dsr.stop()
+            # gripper.open()
+            # dsr.control_thread_stop()
+            # gripper.control_thread_stop()
+            # return
+            break
+
         rate.sleep()
     
-    print(f'Avg Control Frequency [Hz]: {max_timesteps / (time.time() - time0)}')
+    data_timesteps = len(data_dict['/observations/xpos'])
+    print(f'data_length: {data_timesteps} steps ({data_timesteps/HZ}s)')
+    print(f'Avg Control Frequency [Hz]: {data_timesteps / (time.time() - time0)}')
     master_arms.dsrDisconnect()
     # open gripper
     gripper.open()
@@ -177,7 +235,8 @@ def main(args):
     gripper.control_thread_stop()
     master_arms.thread_stop()
 
-
+    restore_terminal(sys.stdin.fileno(), old_settings)
+    
     COMPRESS = True
 
     if COMPRESS:
@@ -243,32 +302,42 @@ def main(args):
         root.attrs['compress'] = COMPRESS
         obs = root.create_group('observations')
         actions = root.create_group('actions')
+        rewards = root.create_group('rewards')
+        labels = root.create_group('labels')
         image = obs.create_group('images')
         # depth = obs.create_group('depth_images')
+        
+        ### observations ###
         for cam_name in camera_names:
             if COMPRESS:
-                _ = image.create_dataset(cam_name, (max_timesteps, padded_size), dtype='uint8',
+                _ = image.create_dataset(cam_name, (data_timesteps, padded_size), dtype='uint8',
                                          chunks=(1, padded_size), )
-                # _ = depth.create_dataset(cam_name, (max_timesteps, padded_size2), dtype='uint8',
+                # _ = depth.create_dataset(cam_name, (data_timesteps, padded_size2), dtype='uint8',
                 #                          chunks=(1, padded_size2), )
             else:
-                _ = image.create_dataset(cam_name, (max_timesteps, 360, 1280, 3), dtype='uint8',
+                _ = image.create_dataset(cam_name, (data_timesteps, 360, 1280, 3), dtype='uint8',
                                          chunks=(1, 360, 1280, 3), )
-                # _ = depth.create_dataset(cam_name, (max_timesteps, 360, 1280), dtype='uint8',
+                # _ = depth.create_dataset(cam_name, (data_timesteps, 360, 1280), dtype='uint8',
                 #                         chunks=(1, 360, 1280, 1), )
-        _ = obs.create_dataset('xpos', (max_timesteps, 3*num_robots))
-        _ = obs.create_dataset('euler', (max_timesteps, 3*num_robots))
-        _ = obs.create_dataset('gripper_pos', (max_timesteps, 1*num_robots))
-        _ = actions.create_dataset('pose', (max_timesteps, 6*num_robots))
-        _ = actions.create_dataset('gripper_pos', (max_timesteps, 1*num_robots))
+        _ = obs.create_dataset('xpos', (data_timesteps, 3*num_robots))
+        _ = obs.create_dataset('euler', (data_timesteps, 3*num_robots))
+        _ = obs.create_dataset('gripper_pos', (data_timesteps, 1*num_robots))
+        ### actions ###
+        _ = actions.create_dataset('pose', (data_timesteps, 6*num_robots))
+        _ = actions.create_dataset('gripper_pos', (data_timesteps, 1*num_robots))
 
+        ### rewards ###
+        _ = rewards.create_dataset('task', (data_timesteps, 1))
+        ### labels ### 
+        _ = labels.create_dataset('task_done', (data_timesteps, 1))
+        
         for name, array in data_dict.items():
             root[name][...] = array
 
         if COMPRESS:
-            _ = root.create_dataset('compressed_image_len', (len(camera_names), max_timesteps))
+            _ = root.create_dataset('compressed_image_len', (len(camera_names), data_timesteps))
             root['/compressed_image_len'][...] = compressed_image_len
-            # _ = root.create_dataset('compressed_depth_len', (len(camera_names), max_timesteps))
+            # _ = root.create_dataset('compressed_depth_len', (len(camera_names), data_timesteps))
             # root['/compressed_depth_len'][...] = compressed_depth_len
 
     print(f'Saving: {time.time() - t0:.1f} secs')
@@ -285,7 +354,7 @@ def get_auto_index(dataset_dir, dataset_name_prefix = '', data_suffix = 'hdf5'):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task_name', action='store', type=str, help='Task name.', default='dsr_block_sort_demo_head_camera', required=False)
+    parser.add_argument('--task_name', action='store', type=str, help='Task name.', default='dsr_tableware_sort', required=False)
     parser.add_argument('--episode_idx', action='store', type=int, help='Episode index.', default=None, required=False)
     main(vars(parser.parse_args())) # TODO
     # debug()

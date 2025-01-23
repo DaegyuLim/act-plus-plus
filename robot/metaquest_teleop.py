@@ -83,10 +83,12 @@ class dsrSingleArmControl:
         self.left_hand_inputs = OVR2ROSInputs()
 
         self.right_arm_pose_state_msg = PoseStamped()
+        self.right_arm_pose_state_msg.header.frame_id = "world"
         self.right_arm_pose_state_msg.pose.orientation.w = 1
         self.right_gripper_state_msg = Float32()
 
         self.right_arm_pose_action_msg = PoseStamped()
+        self.right_arm_pose_action_msg.header.frame_id = "world"
         self.right_arm_pose_action_msg.pose.orientation.w = 1
         self.right_gripper_action_msg = Float32()
 
@@ -171,6 +173,7 @@ class dsrSingleArmControl:
 
     def shutdown(self):
         print(f"\n DSR({self.robot_id}) CONTROL SHUTDOWN! \n")
+        self.stop()
         self.stop_control_loop = True
         self.drl_tcp_client.shutdown()
         return 0
@@ -300,9 +303,9 @@ class dsrSingleArmControl:
         current_dsr_quat = current_dsr_rotation.as_quat() # [x, y, z, w]
 
         self.right_arm_pose_state_msg.header.stamp = rospy.Time.now()
-        self.right_arm_pose_state_msg.pose.position.x = self.current_dsr_pos[0]
-        self.right_arm_pose_state_msg.pose.position.y = self.current_dsr_pos[1]
-        self.right_arm_pose_state_msg.pose.position.z = self.current_dsr_pos[2]
+        self.right_arm_pose_state_msg.pose.position.x = self.current_dsr_pos[0]/1000 # [mm] to [m]
+        self.right_arm_pose_state_msg.pose.position.y = self.current_dsr_pos[1]/1000
+        self.right_arm_pose_state_msg.pose.position.z = self.current_dsr_pos[2]/1000
         self.right_arm_pose_state_msg.pose.orientation.x = current_dsr_quat[0]
         self.right_arm_pose_state_msg.pose.orientation.y = current_dsr_quat[1]
         self.right_arm_pose_state_msg.pose.orientation.z = current_dsr_quat[2]
@@ -435,16 +438,19 @@ class dsrSingleArmControl:
         return target_vel
 
     def rosMsgPublish(self):
-        self.right_arm_pose_action_msg.pose.position.x = self.dsr_desired_x_pose_lpf[0]
-        self.right_arm_pose_action_msg.pose.position.y = self.dsr_desired_x_pose_lpf[1]
-        self.right_arm_pose_action_msg.pose.position.z = self.dsr_desired_x_pose_lpf[2]
+        self.right_arm_pose_action_msg.pose.position.x = self.dsr_desired_x_pose_lpf[0]/1000
+        self.right_arm_pose_action_msg.pose.position.y = self.dsr_desired_x_pose_lpf[1]/1000
+        self.right_arm_pose_action_msg.pose.position.z = self.dsr_desired_x_pose_lpf[2]/1000
 
+        action_rotation = Rotation.from_euler("ZYZ", self.dsr_desired_x_pose_lpf[3:6], degrees=True)
+        self.quat_des = action_rotation.as_quat()
+        
         self.right_arm_pose_action_msg.pose.orientation.x = self.quat_des[0]
         self.right_arm_pose_action_msg.pose.orientation.y = self.quat_des[1]
         self.right_arm_pose_action_msg.pose.orientation.z = self.quat_des[2]
         self.right_arm_pose_action_msg.pose.orientation.w = self.quat_des[3]
         self.right_arm_pose_action_msg.header.stamp = rospy.Time.now()
-
+            
         self.pose_state_pub.publish(self.right_arm_pose_state_msg)
         self.pose_action_pub.publish(self.right_arm_pose_action_msg)
 
@@ -503,8 +509,6 @@ class dsrSingleArmControl:
         # print(f'rotvec: {self.current_dsr_rotvec}')
         # print(f'get_action: {self.get_action()}')
         
-        
-
         self.rosMsgPublish()
         # save current values to the previous values
         self.savePrevData()
@@ -637,13 +641,15 @@ class drlControl:
 
     def stop(self):
         for idx in range(self.num_robots):
-            self.dsr_list[idx].control_mode = 0
+            self.dsr_list[idx].stop()
+            
+            # self.dsr_list[idx].control_mode = 0
 
-            self.dsr_list[idx].dsr_desired_x_pose_lpf[0:3] = self.dsr_list[idx].current_dsr_pos[:]
-            self.dsr_list[idx].dsr_desired_x_pose_lpf[3:6] = self.dsr_list[idx].current_dsr_euler[:]
+            # self.dsr_list[idx].dsr_desired_x_pose_lpf[0:3] = self.dsr_list[idx].current_dsr_pos[:]
+            # self.dsr_list[idx].dsr_desired_x_pose_lpf[3:6] = self.dsr_list[idx].current_dsr_euler[:]
 
-            self.dsr_list[idx].dsr_desired_x_vel = [0, 0, 0, 0, 0, 0]
-            self.dsr_list[idx].drl_tcp_client.send_command(self.dsr_list[idx].control_mode, self.dsr_list[idx].dsr_desired_x_vel)
+            # self.dsr_list[idx].dsr_desired_x_vel = [0, 0, 0, 0, 0, 0]
+            # self.dsr_list[idx].drl_tcp_client.send_command(self.dsr_list[idx].control_mode, self.dsr_list[idx].dsr_desired_x_vel)
 
     def get_xpos(self):
         current_dsr_pos = np.zeros(0)

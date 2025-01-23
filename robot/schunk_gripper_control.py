@@ -291,7 +291,7 @@ class singleGripperControl:
 
     def send_gripper_pos(self, des_pos = 1):
         desired_gripper_pos_um = int( np.clip(83000 *(1-des_pos), 0, 83000) )
-        gripper_force = 1 ## dim:  percentage(%)
+        gripper_force = 100 ## dim:  percentage(%)
         # print("desired_gripper_pos_um: ", desired_gripper_pos_um)
         
         gripper_position_command = desired_gripper_pos_um.to_bytes(4, 'little', signed=True)
@@ -311,6 +311,7 @@ class singleGripperControl:
         self.controller_inputs_raw = data.data
 
     def shutdown(self):
+        self.open()
         self.stop_control_loop = True
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
