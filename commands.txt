@@ -28,6 +28,24 @@ python train.py \
 --lr 1e-5 
 
 
+# tableware_sort
+
+python train.py \
+--ckpt_dir ./ckpt/dsr_tableware_sort_clean_plate/resume_block_sort_chunk_24_obs_2_img_2_evr_20_batch_16_resnet_34_lr_1e-5_1e-4_seed_20 \
+--policy_class ACT \
+--task_name dsr_tableware_sort_clean_plate \
+--batch_size 16 \
+--chunk_size 24 \
+--robot_obs_size 2 \
+--img_obs_size 2 \
+--img_obs_every 20 \
+--seed 20 \
+--num_steps 100000 \
+--lr 1e-5 \
+--resume_ckpt_path /home/robrosdg/dg/robros_imitation_learning/ckpt/dsr_tableware_sort_clean_plate/resume_block_sort_chunk_24_obs_2_img_2_evr_20_batch_16_resnet_34_lr_1e-5_1e-4_seed_21/policy_step_12000_seed_21.ckpt \
+--wandb \
+--validate_every 10000
+
 
 # image test
 python train.py \

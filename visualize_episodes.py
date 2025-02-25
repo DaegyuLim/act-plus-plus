@@ -61,8 +61,7 @@ def get_auto_index_list(dataset_dir, dataset_name_prefix = '', data_suffix = 'hd
             if not os.path.isfile(os.path.join(dataset_dir, f'{dataset_name_prefix}episode_{i}_video.mp4')):
                 index_list.append(i)
     return index_list
-    
-    
+       
 
 
 
@@ -86,7 +85,9 @@ def save_videos(video, dt, video_path=None, is_compressed = True):
         print(f'Saved video to: {video_path}')
     elif isinstance(video, dict):
         cam_names = list(video.keys())
-        cam_names = sorted(cam_names)
+        
+        # cam_names = sorted(cam_names) # sort in ascending order
+        
         all_cam_videos = []
 
         if is_compressed:

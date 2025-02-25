@@ -33,6 +33,14 @@ TASK_CONFIGS = {
         'camera_names': ['lhand_camera', 'rhand_camera', 'head_camera'],
         'robot_id_list': ['dsr_l', 'dsr_r'],
         # 'sample_weights': [3,1],
+    },
+    'dsr_tableware_sort_clean_plate':{
+        'dataset_dir': [DATA_DIR + '/dsr_tableware_sort/clean_plate/IL'],
+        'episode_len': 3600,
+        'train_ratio': 0.99,
+        'camera_names': ['lhand_camera', 'rhand_camera', 'head_camera'],
+        'robot_id_list': ['dsr_l', 'dsr_r'],
+        # 'sample_weights': [3,1],
     }
 }
 
